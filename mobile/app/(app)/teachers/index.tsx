@@ -1,0 +1,2 @@
+import { ResourceList } from "@/components";
+export default function TeachersScreen() { return <ResourceList endpoint="/teachers" eyebrow="PEOPLE" title="Teachers" icon="👩‍🏫" emptyTitle="No teachers yet" emptyMessage="Build your teaching team here." searchPlaceholder="Search teachers" fields={[{ key: "employee_number", label: "Employee number", required: true }, { key: "specialization", label: "Specialization" }, { key: "joining_date", label: "Joining date (YYYY-MM-DD)" }]} />; }

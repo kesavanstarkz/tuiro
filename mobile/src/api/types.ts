@@ -1,0 +1,12 @@
+export type Id = string;
+export type Student = { id: Id; organization_id: Id; student_number: string; first_name: string; last_name: string; school?: string | null; grade?: string | null; joining_date?: string | null; status: string };
+export type Parent = { id: Id; name: string; phone?: string | null; email?: string | null; relationship?: string | null; status: string };
+export type Teacher = { id: Id; employee_number?: string | null; specialization?: string | null; joining_date?: string | null; status: string };
+export type ClassItem = { id: Id; name: string; subject?: string | null; description?: string | null; fee_amount: string | number; status: string };
+export type Fee = { id: Id; student_id: Id; student_name: string; billing_period: string; amount: string | number; amount_due: string | number; paid_amount: string | number; outstanding_amount: string | number; due_date: string; status: "PAID" | "PENDING" | "PARTIAL" | "OVERDUE" };
+export type Payment = { id: Id; fee_id: Id; student_id: Id; student_name: string; amount: string | number; payment_date: string; payment_method: string; billing_period?: string | null; notes?: string | null };
+export type AttendanceStatus = "PRESENT" | "ABSENT" | "LATE" | "EXCUSED";
+export type AttendanceSessionResponse = { session: { id: Id } | null; records: Array<{ student_id: Id; status: AttendanceStatus; notes?: string | null }> };
+export type Homework = { id: Id; class_id: Id; title: string; description?: string | null; due_date?: string | null };
+export type AcademicTest = { id: Id; class_id: Id; name: string; subject?: string | null; test_date: string; maximum_marks: string | number };
+export type Schedule = { id: Id; class_id: Id; teacher_id?: Id | null; day_of_week: number; start_time: string; end_time: string; room?: string | null };

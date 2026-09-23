@@ -1,0 +1,2 @@
+import { ResourceList } from "@/components";
+export default function ClassesScreen() { return <ResourceList endpoint="/classes" eyebrow="PEOPLE" title="Classes" icon="🏫" emptyTitle="No classes yet" emptyMessage="Create your first batch to get started." searchPlaceholder="Search classes" fields={[{ key: "name", label: "Class / batch name", required: true }, { key: "subject", label: "Subject" }, { key: "description", label: "Description" }, { key: "fee_amount", label: "Monthly fee", keyboardType: "decimal-pad" }]} detailHref={(item) => `/classes/${String(item.id)}`} />; }

@@ -1,0 +1,2 @@
+import apiClient from "./client";
+export const reportsApi = { dashboard: () => apiClient.get("/dashboard").then((r) => r.data), fees: () => apiClient.get("/reports/fees").then((r) => r.data), attendance: () => apiClient.get("/reports/attendance").then((r) => r.data), feeCsv: () => apiClient.get("/reports/fees/export.csv", { responseType: "blob" }).then((r) => r.data), attendanceCsv: () => apiClient.get("/reports/attendance/export.csv", { responseType: "blob" }).then((r) => r.data) };

@@ -1,0 +1,2 @@
+import { ResourceList } from "@/components";
+export default function NotificationsScreen() { return <ResourceList endpoint="/notifications" eyebrow="BUSINESS" title="Notifications" icon="🔔" emptyTitle="No notifications yet" emptyMessage="Reminder and message history will appear here." searchPlaceholder="Search notifications" fields={[{ key: "recipient", label: "Recipient", required: true }, { key: "message", label: "Message", required: true }, { key: "notification_type", label: "Type" }, { key: "channel", label: "Channel" }]} />; }

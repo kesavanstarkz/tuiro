@@ -1,0 +1,2 @@
+import { ResourceList } from "@/components";
+export default function ParentsScreen() { return <ResourceList endpoint="/parents" eyebrow="PEOPLE" title="Parents" icon="👨‍👩‍👧" emptyTitle="No parents yet" emptyMessage="Add guardians to keep families connected." searchPlaceholder="Search parents" fields={[{ key: "name", label: "Name", required: true }, { key: "phone", label: "Phone / WhatsApp", keyboardType: "numeric" }, { key: "email", label: "Email", keyboardType: "email-address" }, { key: "relationship", label: "Relationship" }]} />; }
