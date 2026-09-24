@@ -7,6 +7,7 @@ import { z } from "zod";
 
 import { useAuthStore } from "@/store/auth";
 import { Button, TuiroInput } from "@/components";
+import { apiErrorMessage } from "@/api/client";
 
 const schema = z.object({ email: z.string().email(), password: z.string().min(8) });
 type FormData = z.infer<typeof schema>;
@@ -15,7 +16,7 @@ export default function LoginScreen() {
     const signIn = useAuthStore((state) => state.signIn);
     const [error, setError] = useState("");
     const { control, handleSubmit, formState: { errors, isSubmitting } } = useForm<FormData>({ resolver: zodResolver(schema), defaultValues: { email: "", password: "" } });
-    const submit = async (values: FormData) => { setError(""); try { await signIn(values.email, values.password); router.replace("/(app)/(tabs)"); } catch { setError("Unable to sign in. Check your details and try again."); } };
+    const submit = async (values: FormData) => { setError(""); try { await signIn(values.email, values.password); router.replace("/(app)/(tabs)"); } catch (cause) { setError(apiErrorMessage(cause, "Unable to sign in. Check your details and try again.")); } };
     return <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.page}><ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled"><Text style={styles.kicker}>TUIRO</Text><Text style={styles.title}>Welcome back 👋</Text><Text style={styles.copy}>Keep your centre moving.</Text>
         <Controller control={control} name="email" render={({ field: { onChange, value } }) => <TuiroInput label="Email" autoCapitalize="none" keyboardType="email-address" placeholder="you@example.com" onChangeText={onChange} value={value} error={errors.email ? "Enter a valid email." : undefined} />} />
         <Controller control={control} name="password" render={({ field: { onChange, value } }) => <TuiroInput label="Password" secureTextEntry placeholder="Your password" onChangeText={onChange} value={value} error={errors.password ? "Use at least 8 characters." : undefined} />} />

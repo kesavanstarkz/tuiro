@@ -3,12 +3,32 @@ import Constants from "expo-constants";
 import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
 
-const expoHost = Constants.expoConfig?.hostUri?.split(":")[0];
-// A phone cannot reach the development machine through localhost. Configure a LAN URL
-// in mobile/.env; Expo's host is only a convenient development fallback.
-// Web runs on the same development machine as FastAPI, while native devices
-// must use EXPO_PUBLIC_API_URL with the machine's LAN address.
-const apiBaseUrl = process.env.EXPO_PUBLIC_API_URL ?? (expoHost ? `http://${expoHost}:8000/api/v1` : Platform.OS === "web" ? "http://127.0.0.1:8000/api/v1" : undefined);
+function resolveApiBaseUrl(): string {
+    if (process.env.EXPO_PUBLIC_API_URL) {
+        return process.env.EXPO_PUBLIC_API_URL;
+    }
+    if (Platform.OS === "web") {
+        if (typeof window !== "undefined" && window.location?.hostname) {
+            return `http://${window.location.hostname}:8000/api/v1`;
+        }
+        return "http://127.0.0.1:8000/api/v1";
+    }
+    const hostUri =
+        Constants.expoConfig?.hostUri ??
+        (Constants as unknown as { expoGoConfig?: { debuggerHost?: string } })?.expoGoConfig?.debuggerHost ??
+        (Constants as unknown as { manifest2?: { extra?: { expoGo?: { debuggerHost?: string } } } })?.manifest2?.extra?.expoGo?.debuggerHost ??
+        (Constants as unknown as { manifest?: { debuggerHost?: string } })?.manifest?.debuggerHost;
+    if (hostUri) {
+        const host = hostUri.split(":")[0];
+        return `http://${host}:8000/api/v1`;
+    }
+    if (Platform.OS === "android") {
+        return "http://10.0.2.2:8000/api/v1";
+    }
+    return "http://127.0.0.1:8000/api/v1";
+}
+
+const apiBaseUrl = resolveApiBaseUrl();
 
 const apiClient = axios.create({
     baseURL: apiBaseUrl,
@@ -73,7 +93,7 @@ export function apiErrorMessage(error: unknown, fallback = "Something went wrong
         if (typeof data?.detail === "string") return data.detail;
         if (Array.isArray(data?.detail)) return data.detail.map((item) => item.msg).filter(Boolean).join(" ") || fallback;
         if (error.code === "ECONNABORTED") return "The request timed out. Please try again.";
-        if (!error.response) return "Unable to reach Tuiro. Check your connection and try again.";
+        if (!error.response) return "Unable to reach the server. Please check your connection and ensure the backend server is running.";
     }
     return error instanceof Error && error.message === "API_URL_NOT_CONFIGURED" ? "The app API address is not configured." : fallback;
 }

@@ -126,3 +126,13 @@ def test_group_roster_handles_empty_populated_and_invalid_group_ids():
 
     invalid = client.get("/api/v1/groups/students/not-a-uuid", headers=headers)
     assert invalid.status_code == 404 and invalid.headers["content-type"].startswith("application/json")
+
+
+def test_cors_allows_lan_and_localhost_origins():
+    # LAN IP origins (e.g. physical phone or web opened on LAN) should receive CORS headers
+    res = client.options("/api/v1/health", headers={"Origin": "http://192.168.1.21:8081", "Access-Control-Request-Method": "GET"})
+    assert res.headers.get("access-control-allow-origin") == "http://192.168.1.21:8081"
+
+    res_local = client.options("/api/v1/health", headers={"Origin": "http://localhost:8081", "Access-Control-Request-Method": "GET"})
+    assert res_local.headers.get("access-control-allow-origin") == "http://localhost:8081"
+

@@ -7,6 +7,7 @@ import { z } from "zod";
 
 import { useAuthStore } from "@/store/auth";
 import { Button, TuiroInput } from "@/components";
+import { apiErrorMessage } from "@/api/client";
 
 const schema = z.object({ display_name: z.string().min(1), organization_name: z.string().min(1), email: z.string().email(), password: z.string().min(8) });
 type FormData = z.infer<typeof schema>;
@@ -14,7 +15,7 @@ type FormData = z.infer<typeof schema>;
 export default function RegisterScreen() {
     const register = useAuthStore((state) => state.register); const [error, setError] = useState("");
     const { control, handleSubmit, formState: { isSubmitting } } = useForm<FormData>({ resolver: zodResolver(schema), defaultValues: { display_name: "", organization_name: "", email: "", password: "" } });
-    const submit = async (values: FormData) => { setError(""); try { await register(values); router.replace("/(app)/(tabs)"); } catch (cause) { const message = cause instanceof Error ? cause.message : "Unable to create the account. Please try again."; setError(message); } };
+    const submit = async (values: FormData) => { setError(""); try { await register(values); router.replace("/(app)/(tabs)"); } catch (cause) { setError(apiErrorMessage(cause, "Unable to create the account. Please try again.")); } };
     const field = (name: keyof FormData, label: string, placeholder: string, secure = false) => <Controller control={control} name={name} render={({ field: { onChange, value } }) => <TuiroInput label={label} placeholder={placeholder} secureTextEntry={secure} onChangeText={onChange} value={value} />} />;
     // Registration can be opened directly from a URL, leaving no navigation history.
     // Replacing the route is valid on web and native in either case.
