@@ -4,14 +4,14 @@ import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
 
 function resolveApiBaseUrl(): string {
-    if (process.env.EXPO_PUBLIC_API_URL) {
-        return process.env.EXPO_PUBLIC_API_URL;
-    }
     if (Platform.OS === "web") {
         if (typeof window !== "undefined" && window.location?.hostname) {
             return `http://${window.location.hostname}:8000/api/v1`;
         }
         return "http://127.0.0.1:8000/api/v1";
+    }
+    if (process.env.EXPO_PUBLIC_API_URL) {
+        return process.env.EXPO_PUBLIC_API_URL;
     }
     const hostUri =
         Constants.expoConfig?.hostUri ??
@@ -93,7 +93,12 @@ export function apiErrorMessage(error: unknown, fallback = "Something went wrong
         if (typeof data?.detail === "string") return data.detail;
         if (Array.isArray(data?.detail)) return data.detail.map((item) => item.msg).filter(Boolean).join(" ") || fallback;
         if (error.code === "ECONNABORTED") return "The request timed out. Please try again.";
-        if (!error.response) return "Unable to reach the server. Please check your connection and ensure the backend server is running.";
+        if (!error.response) {
+            const base = (error.config?.baseURL ?? apiClient.defaults.baseURL ?? "").replace(/\/+$/, "");
+            const endpoint = (error.config?.url ?? "").replace(/^\/+/, "");
+            const fullUrl = base && endpoint ? `${base}/${endpoint}` : base || endpoint;
+            return `Unable to reach the server at ${fullUrl || "configured URL"}. Please check your connection and ensure the backend server is running.`;
+        }
     }
     return error instanceof Error && error.message === "API_URL_NOT_CONFIGURED" ? "The app API address is not configured." : fallback;
 }
