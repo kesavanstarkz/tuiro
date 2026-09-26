@@ -330,3 +330,40 @@ class TestAcademicAndFinancialWorkflows:
         assert dash_res.status_code == 200
         dash = dash_res.json()
         assert dash["students"] >= 1
+
+        # 14. Verify Class-Group Sync & Assignment Lifecycle
+        # Both /classes and /groups should have the class
+        groups_res = client.get("/api/v1/groups", headers=headers)
+        assert groups_res.status_code == 200
+        matched_group = next((g for g in groups_res.json() if g["id"] == class_id), None)
+        assert matched_group is not None
+        assert matched_group["name"] == "Grade 10 Mathematics"
+
+        # Student roster should be synced to group members
+        members_res = client.get(f"/api/v1/groups/{class_id}/members", headers=headers)
+        assert members_res.status_code == 200
+        assert any(m["id"] == student_id for m in members_res.json())
+
+        # Create Assignment under group
+        asgn_res = client.post(
+            "/api/v1/groups/assignments",
+            headers=headers,
+            json={
+                "group_id": class_id,
+                "title": "Algebra Practice Sheet",
+                "description": "Solve problems 1-20",
+                "due_date": "2026-10-05",
+                "type": "assignment",
+            },
+        )
+        assert asgn_res.status_code == 201
+        asgn_id = asgn_res.json()["id"]
+
+        # List Assignments
+        list_asgn_res = client.get("/api/v1/groups/assignments", headers=headers)
+        assert list_asgn_res.status_code == 200
+        assert any(a["id"] == str(asgn_id) for a in list_asgn_res.json())
+
+        # Delete Assignment
+        del_res = client.delete(f"/api/v1/groups/assignments/{asgn_id}", headers=headers)
+        assert del_res.status_code == 204

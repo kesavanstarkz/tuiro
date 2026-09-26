@@ -1,21 +1,95 @@
 import { Platform } from "react-native";
 
-// Atelier: inky evergreen, warm stone, and a single saffron action accent.
+// Tuiro Production Design System (§6)
+// Brand personality: warm, trustworthy, calm — an admin tool a teacher opens dozens of times a day.
 export const colors = {
-    primary: "#173F3A", primaryDark: "#0B2925", primaryLight: "#E5F0EA", accent: "#D66A3D", accentSoft: "#FBE9E0",
-    ink: "#162522", inkSoft: "#52605B", paper: "#F7F5F0", white: "#FFFDF9", coral: "#D66A3D", coralSoft: "#FBE9E0",
-    sage: "#39735C", sageSoft: "#E5F2EB", amber: "#A96717", amberSoft: "#FFF1D8", red: "#B7444E", redSoft: "#FBE8E9",
-    info: "#286B62", line: "#E5E3DC", muted: "#7C8781", featureBlue: "#E5F0EA", featurePurple: "#F2EEE6", featureMint: "#E5F2EB", featureYellow: "#FFF1D8",
+    // Primary: terracotta/orange — primary actions, active states
+    primary: "#C1622D",
+    primaryHover: "#A8501F",
+    primaryDark: "#A8501F",
+    primaryLight: "#FCEFE7",
+
+    // Ink: deep forest / near-black green — headings, nav active bg
+    ink: "#1E2A23",
+    inkSoft: "#3E4A42",
+
+    // Surface / Background
+    paper: "#FAF8F4",
+    surface: "#FAF8F4",
+    white: "#FFFFFF",
+    surfaceCard: "#FFFFFF",
+    line: "#E7E2D9",
+    border: "#E7E2D9",
+
+    // Functional Statuses
+    success: "#2F7D52",
+    warning: "#C1622D",
+    danger: "#B3261E",
+    red: "#B3261E",
+    redSoft: "#FBE8E9",
+    sage: "#2F7D52",
+    sageSoft: "#E7F3EC",
+    amber: "#C1622D",
+    amberSoft: "#FCEFE7",
+    coral: "#C1622D",
+    coralSoft: "#FCEFE7",
+    accent: "#C1622D",
+    accentSoft: "#FCEFE7",
+
+    // Typography Colors
+    textPrimary: "#1E2A23",
+    textSecondary: "#6B6459",
+    muted: "#6B6459",
+
+    // Badges & Accents
+    badgeActiveBg: "#E7F3EC",
+    badgeActiveText: "#2F7D52",
+    featureBlue: "#F1EBE1",
+    featurePurple: "#F4EFE6",
+    featureMint: "#E7F3EC",
+    featureYellow: "#FCEFE7",
 };
-export const spacing = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32, xxxl: 40, huge: 48 };
-export const radius = { sm: 10, md: 14, lg: 18, xl: 26, pill: 999 };
-const displayFamily = Platform.select({ ios: "Avenir Next Condensed", android: "sans-serif-condensed", web: "Arial Narrow, Avenir Next, sans-serif", default: "sans-serif" });
-const bodyFamily = Platform.select({ ios: "Avenir Next", android: "sans-serif", web: "Avenir Next, Inter, sans-serif", default: "sans-serif" });
+
+// 8px base spacing unit
+export const spacing = { xs: 4, sm: 8, md: 12, lg: 16, xl: 20, xxl: 24, xxxl: 32, huge: 40 };
+
+// Corner radius: Card radius 16px, inputs/buttons 12px
+export const radius = { sm: 8, md: 12, lg: 16, xl: 24, pill: 999 };
+
+const fontFallback = '-apple-system, "Segoe UI", Roboto, sans-serif';
+const displayFamily = Platform.select({
+    ios: "Avenir Next, " + fontFallback,
+    android: "sans-serif-medium",
+    web: "Inter, " + fontFallback,
+    default: fontFallback,
+});
+const bodyFamily = Platform.select({
+    ios: "Avenir Next, " + fontFallback,
+    android: "sans-serif",
+    web: "Inter, " + fontFallback,
+    default: fontFallback,
+});
+
 export const typography = {
-    display: { fontFamily: displayFamily, fontSize: 32, lineHeight: 38, fontWeight: "800" as const, color: colors.ink, letterSpacing: -0.8 },
-    heading: { fontFamily: displayFamily, fontSize: 20, lineHeight: 26, fontWeight: "700" as const, color: colors.ink, letterSpacing: -0.35 },
-    body: { fontFamily: bodyFamily, fontSize: 14, lineHeight: 21, color: colors.inkSoft },
-    caption: { fontFamily: bodyFamily, fontSize: 12, lineHeight: 17, color: colors.muted },
-    label: { fontFamily: bodyFamily, fontSize: 10, lineHeight: 14, fontWeight: "800" as const, color: colors.inkSoft, letterSpacing: 1.05 },
+    // 28 / 22 / 17 / 15 / 13px scale
+    display: { fontFamily: displayFamily, fontSize: 28, lineHeight: 34, fontWeight: "600" as const, color: colors.ink, letterSpacing: -0.5 },
+    heading: { fontFamily: displayFamily, fontSize: 22, lineHeight: 28, fontWeight: "600" as const, color: colors.ink, letterSpacing: -0.3 },
+    bodyLg: { fontFamily: bodyFamily, fontSize: 17, lineHeight: 24, fontWeight: "400" as const, color: colors.inkSoft },
+    body: { fontFamily: bodyFamily, fontSize: 15, lineHeight: 22, fontWeight: "400" as const, color: colors.inkSoft },
+    caption: { fontFamily: bodyFamily, fontSize: 13, lineHeight: 18, fontWeight: "400" as const, color: colors.muted },
+    label: { fontFamily: bodyFamily, fontSize: 11, lineHeight: 15, fontWeight: "600" as const, color: colors.muted, letterSpacing: 1.1, textTransform: "uppercase" as const },
 };
-export const shadow = Platform.select({ ios: { shadowColor: "#132622", shadowOpacity: 0.08, shadowRadius: 18, shadowOffset: { width: 0, height: 7 } }, android: { elevation: 3 }, web: { boxShadow: "0 10px 28px rgba(22, 37, 34, 0.08)" }, default: {} });
+
+export const shadow = Platform.select({
+    ios: { shadowColor: colors.ink, shadowOpacity: 0.05, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } },
+    android: { elevation: 2 },
+    web: { boxShadow: "0 2px 8px rgba(30, 42, 35, 0.05)" },
+    default: {},
+});
+
+export const modalShadow = Platform.select({
+    ios: { shadowColor: colors.ink, shadowOpacity: 0.16, shadowRadius: 24, shadowOffset: { width: 0, height: 10 } },
+    android: { elevation: 10 },
+    web: { boxShadow: "0 16px 40px rgba(30, 42, 35, 0.16)" },
+    default: {},
+});

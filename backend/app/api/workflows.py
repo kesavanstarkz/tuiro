@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from app.core.dependencies import Principal, require_authenticated_user, require_roles
 from app.core.errors import TuiroError
 from app.db import get_db
-from app.models import AcademicTest, AttendanceRecord, AttendanceSession, AuditLog, ClassGroup, ClassStudent, ClassTeacher, Homework, Notification, Organization, Payment, Receipt, ScheduleEntry, Student, StudentFee, StudentParent, Parent, Teacher, TestMark
+from app.models import AcademicTest, AttendanceRecord, AttendanceSession, AuditLog, ClassGroup, ClassStudent, ClassTeacher, GroupMember, Homework, Notification, Organization, Payment, Receipt, ScheduleEntry, Student, StudentFee, StudentParent, Parent, Teacher, TestMark
 from app.services.receipts import build_receipt_pdf
 
 router = APIRouter()
@@ -442,7 +442,14 @@ def assign_student(class_id: UUID, request: AssignmentInput, principal: Principa
     _org_record(db, ClassGroup, principal.organization_id, class_id)
     _org_record(db, Student, principal.organization_id, request.record_id)
     existing = db.scalar(select(ClassStudent).where(ClassStudent.organization_id == principal.organization_id, ClassStudent.class_id == class_id, ClassStudent.student_id == request.record_id))
-    if existing: return existing
+    gm = db.scalar(select(GroupMember).where(GroupMember.group_id == class_id, GroupMember.student_id == request.record_id))
+    if gm:
+        gm.removed_at = None
+    else:
+        db.add(GroupMember(organization_id=principal.organization_id, group_id=class_id, student_id=request.record_id))
+    if existing:
+        db.commit()
+        return existing
     record = ClassStudent(organization_id=principal.organization_id, class_id=class_id, student_id=request.record_id); db.add(record); db.commit(); db.refresh(record); return record
 
 
@@ -456,7 +463,12 @@ def class_students(class_id: UUID, principal: Principal = Depends(require_authen
 def remove_student_from_class(class_id: UUID, student_id: UUID, principal: Principal = Depends(require_roles("OWNER", "ADMIN")), db: Session = Depends(get_db)):
     link = db.scalar(select(ClassStudent).where(ClassStudent.organization_id == principal.organization_id, ClassStudent.class_id == class_id, ClassStudent.student_id == student_id))
     if link is None: raise TuiroError("ENROLLMENT_NOT_FOUND", "Class enrollment not found.", 404)
-    db.delete(link); db.commit()
+    db.delete(link)
+    gm = db.scalar(select(GroupMember).where(GroupMember.group_id == class_id, GroupMember.student_id == student_id, GroupMember.removed_at.is_(None)))
+    if gm:
+        from datetime import datetime, timezone
+        gm.removed_at = datetime.now(timezone.utc)
+    db.commit()
 
 
 @router.post("/classes/{class_id}/teachers", status_code=201)

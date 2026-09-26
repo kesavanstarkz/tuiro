@@ -8,7 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.errors import TuiroError
-from app.models import ClassGroup, Parent, Student, Subscription, SubscriptionPlan, Teacher
+from app.models import ClassGroup, Group, OrganizationMember, Parent, Student, Subscription, SubscriptionPlan, Teacher
 
 
 def _model(kind: str):
@@ -58,6 +58,14 @@ def create_record(db: Session, organization_id: UUID, kind: str, values: dict):
             raise TuiroError("STUDENT_NUMBER_ALREADY_EXISTS", "That student number is already in use. Choose a unique number.", 409) from exc
         raise TuiroError("DUPLICATE_RECORD", "A record with those details already exists.", 409) from exc
     db.refresh(record)
+    if kind == "classes":
+        matching_group = db.scalar(select(Group).where(Group.id == record.id))
+        if not matching_group:
+            om = db.scalar(select(OrganizationMember).where(OrganizationMember.organization_id == organization_id))
+            user_id = om.user_id if om else None
+            if user_id:
+                db.add(Group(id=record.id, organization_id=organization_id, name=record.name, created_by=user_id))
+                db.commit()
     return record
 
 
@@ -79,6 +87,11 @@ def update_record(db: Session, organization_id: UUID, kind: str, record_id: UUID
             raise TuiroError("STUDENT_NUMBER_ALREADY_EXISTS", "That student number is already in use. Choose a unique number.", 409) from exc
         raise TuiroError("DUPLICATE_RECORD", "A record with those details already exists.", 409) from exc
     db.refresh(record)
+    if kind == "classes" and "name" in values:
+        grp = db.scalar(select(Group).where(Group.id == record_id))
+        if grp:
+            grp.name = values["name"]
+            db.commit()
     return record
 
 
@@ -88,5 +101,9 @@ def delete_record(db: Session, organization_id: UUID, kind: str, record_id: UUID
         record.status = "WITHDRAWN"
         db.commit()
         return
+    if kind == "classes":
+        grp = db.scalar(select(Group).where(Group.id == record_id))
+        if grp:
+            db.delete(grp)
     db.delete(record)
     db.commit()

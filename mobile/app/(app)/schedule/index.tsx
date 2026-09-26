@@ -1,20 +1,323 @@
 import { useMemo, useState } from "react";
 import { Alert, FlatList, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { router } from "expo-router";
+
 import { useClasses, useCreateSchedule, useSchedules } from "@/api/hooks";
 import { Button, Card, Chip, EmptyState, ErrorState, IconButton, LoadingState, PageHeader, Screen, TuiroInput } from "@/components";
 import { colors, radius, spacing, typography } from "@/theme";
 
 const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
 export default function ScheduleScreen() {
-    const schedules = useSchedules(); const classes = useClasses(); const create = useCreateSchedule();
-    const [selectedDay, setSelectedDay] = useState(new Date().getDay() === 0 ? 6 : new Date().getDay() - 1); const [open, setOpen] = useState(false);
-    const [classId, setClassId] = useState(""); const [day, setDay] = useState(selectedDay); const [start, setStart] = useState("17:00"); const [end, setEnd] = useState("18:00"); const [room, setRoom] = useState("");
-    const items = useMemo(() => (schedules.data ?? []).filter((entry) => entry.day_of_week === selectedDay), [schedules.data, selectedDay]);
+    const schedules = useSchedules();
+    const classes = useClasses();
+    const create = useCreateSchedule();
+
+    const [selectedDay, setSelectedDay] = useState(new Date().getDay() === 0 ? 6 : new Date().getDay() - 1);
+    const [open, setOpen] = useState(false);
+    const [classId, setClassId] = useState("");
+    const [day, setDay] = useState(selectedDay);
+    const [start, setStart] = useState("17:00");
+    const [end, setEnd] = useState("18:00");
+    const [room, setRoom] = useState("");
+
+    const items = useMemo(
+        () => (schedules.data ?? []).filter((entry) => entry.day_of_week === selectedDay),
+        [schedules.data, selectedDay]
+    );
+
     if (schedules.isLoading || classes.isLoading) return <Screen><LoadingState /></Screen>;
-    if (schedules.isError || classes.isError) return <Screen><ErrorState onRetry={() => { void schedules.refetch(); void classes.refetch(); }} /></Screen>;
-    const className = (id: string) => classes.data?.find((item) => item.id === id)?.name ?? "Class";
-    const save = async () => { if (!classId) { Alert.alert("Choose a class", "Select the class this timetable entry belongs to."); return; } if (!/^\d{2}:\d{2}$/.test(start) || !/^\d{2}:\d{2}$/.test(end)) { Alert.alert("Check the time", "Use the 24-hour HH:MM format, for example 17:00."); return; } try { await create.mutateAsync({ class_id: classId, day_of_week: day, start_time: start, end_time: end, room: room || null }); setOpen(false); setRoom(""); } catch { Alert.alert("Unable to save schedule", "Please check the class and time, then try again."); } };
-    return <Screen><PageHeader eyebrow="ACADEMICS" title="Schedule" right={<IconButton label="Add schedule" onPress={() => setOpen(true)} tone="primary" icon={<MaterialCommunityIcons name="plus" color="#fff" size={22} />} />} /><Text style={styles.subtitle}>Your weekly teaching rhythm</Text><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.days}>{days.map((label, index) => <Chip key={label} selected={selectedDay === index} onPress={() => setSelectedDay(index)}>{label}</Chip>)}</ScrollView><FlatList data={items} refreshing={schedules.isRefetching} onRefresh={() => void schedules.refetch()} contentContainerStyle={styles.list} keyExtractor={(item) => item.id} ListEmptyComponent={<EmptyState icon="📅" title="Nothing scheduled" message="Add a class time to build this day’s timetable." />} renderItem={({ item }) => <View style={styles.timeline}><Text style={styles.time}>{item.start_time}</Text><View style={styles.line}><View style={styles.dot} /></View><Card style={styles.session}><Text style={styles.sessionTitle}>{className(item.class_id)}</Text><Text style={styles.sessionMeta}>{item.start_time} – {item.end_time}{item.room ? ` · ${item.room}` : ""}</Text></Card></View>} /><Modal visible={open} transparent animationType="slide" onRequestClose={() => setOpen(false)}><View style={styles.modal}><ScrollView style={styles.sheet} contentContainerStyle={styles.sheetContent}><Text style={styles.sheetTitle}>Add a class time</Text><Text style={styles.fieldLabel}>Class</Text><View style={styles.classChoices}>{classes.data?.map((item) => <Pressable key={item.id} onPress={() => setClassId(item.id)} style={[styles.classChoice, classId === item.id && styles.classChoiceActive]}><Text style={[styles.classChoiceText, classId === item.id && styles.classChoiceTextActive]}>{item.name}</Text><Text style={[styles.classSubject, classId === item.id && styles.classChoiceTextActive]}>{item.subject ?? "Class"}</Text></Pressable>)}</View><Text style={styles.fieldLabel}>Day</Text><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dayChoices}>{days.map((label, index) => <Chip key={label} selected={day === index} onPress={() => setDay(index)}>{label}</Chip>)}</ScrollView><View style={styles.timeInputs}><View style={styles.half}><TuiroInput label="Starts" value={start} onChangeText={setStart} placeholder="17:00" /></View><View style={styles.half}><TuiroInput label="Ends" value={end} onChangeText={setEnd} placeholder="18:00" /></View></View><TuiroInput label="Room (optional)" value={room} onChangeText={setRoom} placeholder="Room 1" /><View style={styles.actions}><Button variant="ghost" onPress={() => setOpen(false)}>Cancel</Button><Button disabled={create.isPending} onPress={() => void save()}>{create.isPending ? "Saving..." : "Save schedule"}</Button></View></ScrollView></View></Modal></Screen>;
+    if (schedules.isError || classes.isError) {
+        return (
+            <Screen>
+                <ErrorState
+                    onRetry={() => {
+                        void schedules.refetch();
+                        void classes.refetch();
+                    }}
+                />
+            </Screen>
+        );
+    }
+
+    const classList = classes.data ?? [];
+    if (classList.length === 0) {
+        return (
+            <Screen>
+                <PageHeader eyebrow="ACADEMICS" title="Schedule" />
+                <EmptyState
+                    icon="🏫"
+                    title="Create a class first"
+                    message="Timetable needs a class roster. Add your first batch before scheduling class times."
+                    action={<Button onPress={() => router.push("/(app)/classes")}>Create a class</Button>}
+                />
+            </Screen>
+        );
+    }
+
+    const className = (id: string) => classList.find((item) => item.id === id)?.name ?? "Class";
+
+    const save = async () => {
+        if (!classId) {
+            Alert.alert("Choose a class", "Select the class this timetable entry belongs to.");
+            return;
+        }
+        if (!/^\d{2}:\d{2}$/.test(start) || !/^\d{2}:\d{2}$/.test(end)) {
+            Alert.alert("Check the time", "Use the 24-hour HH:MM format, for example 17:00.");
+            return;
+        }
+        try {
+            await create.mutateAsync({
+                class_id: classId,
+                day_of_week: day,
+                start_time: start,
+                end_time: end,
+                room: room || null,
+            });
+            setOpen(false);
+            setRoom("");
+        } catch {
+            Alert.alert("Unable to save schedule", "Please check the class and time, then try again.");
+        }
+    };
+
+    return (
+        <Screen>
+            <PageHeader
+                eyebrow="ACADEMICS"
+                title="Schedule"
+                right={
+                    <IconButton
+                        label="Add schedule"
+                        onPress={() => setOpen(true)}
+                        tone="primary"
+                        icon={<MaterialCommunityIcons name="plus" color="#fff" size={22} />}
+                    />
+                }
+            />
+            <Text style={styles.subtitle}>Your weekly teaching rhythm</Text>
+
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.days}>
+                {days.map((label, index) => (
+                    <Chip key={label} selected={selectedDay === index} onPress={() => setSelectedDay(index)}>
+                        {label}
+                    </Chip>
+                ))}
+            </ScrollView>
+
+            <FlatList
+                data={items}
+                refreshing={schedules.isRefetching}
+                onRefresh={() => void schedules.refetch()}
+                contentContainerStyle={styles.list}
+                keyExtractor={(item) => item.id}
+                ListEmptyComponent={
+                    <EmptyState
+                        icon="📅"
+                        title="Nothing scheduled"
+                        message="Add a class time to build this day’s timetable."
+                        action={<Button onPress={() => setOpen(true)}>+ Add a Class Time</Button>}
+                    />
+                }
+                renderItem={({ item }) => (
+                    <View style={styles.timeline}>
+                        <Text style={styles.time}>{item.start_time}</Text>
+                        <View style={styles.line}>
+                            <View style={styles.dot} />
+                        </View>
+                        <Card style={styles.session}>
+                            <Text style={styles.sessionTitle}>{className(item.class_id)}</Text>
+                            <Text style={styles.sessionMeta}>
+                                {item.start_time} – {item.end_time}
+                                {item.room ? ` · ${item.room}` : ""}
+                            </Text>
+                        </Card>
+                    </View>
+                )}
+            />
+
+            <Modal visible={open} transparent animationType="slide" onRequestClose={() => setOpen(false)}>
+                <View style={styles.modal}>
+                    <ScrollView style={styles.sheet} contentContainerStyle={styles.sheetContent}>
+                        <Text style={styles.sheetTitle}>Add a class time</Text>
+
+                        <Text style={styles.fieldLabel}>Class / Batch</Text>
+                        <View style={styles.classChoices}>
+                            {classList.map((item) => {
+                                const active = classId === item.id;
+                                return (
+                                    <Pressable
+                                        key={item.id}
+                                        onPress={() => setClassId(item.id)}
+                                        style={[styles.classChoice, active && styles.classChoiceActive]}
+                                    >
+                                        <Text style={[styles.classChoiceText, active && styles.classChoiceTextActive]}>
+                                            {item.name}
+                                        </Text>
+                                        <Text style={[styles.classSubject, active && styles.classChoiceTextActive]}>
+                                            {item.subject ?? "Batch"}
+                                        </Text>
+                                    </Pressable>
+                                );
+                            })}
+                        </View>
+
+                        <Text style={styles.fieldLabel}>Day</Text>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dayChoices}>
+                            {days.map((label, index) => (
+                                <Chip key={label} selected={day === index} onPress={() => setDay(index)}>
+                                    {label}
+                                </Chip>
+                            ))}
+                        </ScrollView>
+
+                        <View style={styles.timeInputs}>
+                            <View style={styles.half}>
+                                <TuiroInput label="Starts" value={start} onChangeText={setStart} placeholder="17:00" />
+                            </View>
+                            <View style={styles.half}>
+                                <TuiroInput label="Ends" value={end} onChangeText={setEnd} placeholder="18:00" />
+                            </View>
+                        </View>
+
+                        <TuiroInput label="Room (optional)" value={room} onChangeText={setRoom} placeholder="Room 1" />
+
+                        <View style={styles.actions}>
+                            <Button variant="secondary" onPress={() => setOpen(false)}>Cancel</Button>
+                            <Button disabled={create.isPending || !classId} onPress={() => void save()}>
+                                {create.isPending ? "Saving..." : "Save schedule"}
+                            </Button>
+                        </View>
+                    </ScrollView>
+                </View>
+            </Modal>
+        </Screen>
+    );
 }
-const styles = StyleSheet.create({ subtitle: { ...typography.body, marginTop: -spacing.lg }, days: { flexDirection: "row", gap: spacing.xs, marginTop: spacing.xl }, list: { flexGrow: 1, paddingBottom: spacing.xxl, paddingTop: spacing.xl }, timeline: { flexDirection: "row", minHeight: 104 }, time: { ...typography.label, color: colors.primary, paddingTop: spacing.md, width: 48 }, line: { alignItems: "center", borderLeftColor: colors.line, borderLeftWidth: 2, marginHorizontal: spacing.sm, width: 10 }, dot: { backgroundColor: colors.primary, borderColor: colors.paper, borderRadius: 7, borderWidth: 3, height: 14, width: 14 }, session: { flex: 1, marginBottom: spacing.md, padding: spacing.lg }, sessionTitle: { ...typography.heading, fontSize: 16 }, sessionMeta: { ...typography.body, fontSize: 13, marginTop: spacing.xs }, modal: { backgroundColor: "rgba(25,36,58,0.34)", flex: 1, justifyContent: "flex-end" }, sheet: { backgroundColor: colors.paper, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, maxHeight: "90%" }, sheetContent: { padding: spacing.xl }, sheetTitle: { ...typography.display, fontSize: 25 }, fieldLabel: { ...typography.label, color: colors.ink, marginTop: spacing.lg }, classChoices: { gap: spacing.sm, marginTop: spacing.sm }, classChoice: { backgroundColor: colors.white, borderColor: colors.line, borderRadius: radius.md, borderWidth: 1, padding: spacing.md }, classChoiceActive: { backgroundColor: colors.featureBlue, borderColor: colors.primary }, classChoiceText: { ...typography.heading, fontSize: 15 }, classChoiceTextActive: { color: colors.primaryDark }, classSubject: { ...typography.body, fontSize: 12, marginTop: 2 }, dayChoices: { flexDirection: "row", gap: spacing.xs, marginTop: spacing.sm }, timeInputs: { flexDirection: "row", gap: spacing.sm }, half: { flex: 1 }, actions: { flexDirection: "row", gap: spacing.sm, justifyContent: "flex-end", marginTop: spacing.xl } });
+
+const styles = StyleSheet.create({
+    subtitle: {
+        ...typography.body,
+        color: colors.muted,
+        marginTop: -spacing.sm,
+    },
+    days: {
+        flexDirection: "row",
+        gap: spacing.xs,
+        marginTop: spacing.md,
+    },
+    list: {
+        flexGrow: 1,
+        paddingBottom: spacing.xxl,
+        paddingTop: spacing.lg,
+    },
+    timeline: {
+        flexDirection: "row",
+        minHeight: 96,
+    },
+    time: {
+        ...typography.label,
+        color: colors.primary,
+        paddingTop: spacing.md,
+        width: 48,
+    },
+    line: {
+        alignItems: "center",
+        borderLeftColor: colors.line,
+        borderLeftWidth: 2,
+        marginHorizontal: spacing.sm,
+        width: 10,
+    },
+    dot: {
+        backgroundColor: colors.primary,
+        borderColor: colors.paper,
+        borderRadius: 7,
+        borderWidth: 3,
+        height: 14,
+        width: 14,
+    },
+    session: {
+        flex: 1,
+        marginBottom: spacing.md,
+        padding: spacing.md,
+    },
+    sessionTitle: {
+        ...typography.heading,
+        color: colors.ink,
+        fontSize: 16,
+    },
+    sessionMeta: {
+        ...typography.caption,
+        marginTop: spacing.xs,
+    },
+    modal: {
+        backgroundColor: "rgba(20,28,40,0.45)",
+        flex: 1,
+        justifyContent: "flex-end",
+    },
+    sheet: {
+        backgroundColor: colors.paper,
+        borderTopLeftRadius: 28,
+        borderTopRightRadius: 28,
+        maxHeight: "90%",
+    },
+    sheetContent: {
+        padding: spacing.xl,
+    },
+    sheetTitle: {
+        ...typography.display,
+        fontSize: 24,
+    },
+    fieldLabel: {
+        ...typography.label,
+        color: colors.ink,
+        marginTop: spacing.md,
+    },
+    classChoices: {
+        gap: spacing.xs,
+        marginTop: spacing.xs,
+    },
+    classChoice: {
+        backgroundColor: colors.white,
+        borderColor: colors.line,
+        borderRadius: radius.md,
+        borderWidth: 1,
+        padding: spacing.md,
+    },
+    classChoiceActive: {
+        backgroundColor: colors.coralSoft,
+        borderColor: colors.primary,
+    },
+    classChoiceText: {
+        ...typography.heading,
+        color: colors.ink,
+        fontSize: 15,
+    },
+    classChoiceTextActive: {
+        color: colors.primary,
+    },
+    classSubject: {
+        ...typography.caption,
+        marginTop: 2,
+    },
+    dayChoices: {
+        flexDirection: "row",
+        gap: spacing.xs,
+        marginTop: spacing.xs,
+    },
+    timeInputs: {
+        flexDirection: "row",
+        gap: spacing.sm,
+        marginTop: spacing.xs,
+    },
+    half: {
+        flex: 1,
+    },
+    actions: {
+        flexDirection: "row",
+        gap: spacing.sm,
+        justifyContent: "flex-end",
+        marginTop: spacing.lg,
+    },
+});

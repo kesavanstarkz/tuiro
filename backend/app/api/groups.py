@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 from app.core.dependencies import Principal, require_authenticated_user, require_roles
 from app.core.errors import TuiroError
 from app.db import get_db
-from app.models import Assignment, ChatMessage, ChatParticipant, ChatThread, FeePayment, Group, GroupAttendanceRecord, GroupAttendanceSession, GroupFee, GroupMember, GroupSchedule, OrganizationMember, Parent, Student, StudentParent, User
+from app.models import Assignment, ChatMessage, ChatParticipant, ChatThread, ClassGroup, ClassStudent, FeePayment, Group, GroupAttendanceRecord, GroupAttendanceSession, GroupFee, GroupMember, GroupSchedule, OrganizationMember, Parent, Student, StudentParent, User
 
 router = APIRouter(prefix="/groups", tags=["groups"])
 EDITORS = ("OWNER", "ADMIN", "TEACHER")
@@ -138,7 +138,13 @@ def list_groups(principal: Principal = Depends(require_authenticated_user), db: 
 @router.post("", status_code=201)
 def create_group(request: GroupInput, principal: Principal = Depends(require_roles(*EDITORS)), db: Session = Depends(get_db)):
     group = Group(organization_id=principal.organization_id, name=request.name, created_by=principal.user.id)
-    db.add(group); db.commit(); db.refresh(group)
+    db.add(group)
+    # Ensure ClassGroup stays synchronized
+    cg = db.scalar(select(ClassGroup).where(ClassGroup.id == group.id))
+    if not cg:
+        cg = ClassGroup(id=group.id, organization_id=principal.organization_id, name=request.name, status="ACTIVE")
+        db.add(cg)
+    db.commit(); db.refresh(group)
     return _group_payload(db, group)
 
 
@@ -178,6 +184,10 @@ def add_member(group_id: UUID, student_id: UUID, principal: Principal = Depends(
         member.removed_at = None
     else:
         member = GroupMember(organization_id=principal.organization_id, group_id=group_id, student_id=student_id); db.add(member)
+    # Synchronize ClassStudent
+    cs = db.scalar(select(ClassStudent).where(ClassStudent.organization_id == principal.organization_id, ClassStudent.class_id == group_id, ClassStudent.student_id == student_id))
+    if not cs:
+        db.add(ClassStudent(organization_id=principal.organization_id, class_id=group_id, student_id=student_id))
     db.commit(); db.refresh(member); return member
 
 
@@ -186,7 +196,11 @@ def remove_member(group_id: UUID, student_id: UUID, principal: Principal = Depen
     member = db.scalar(select(GroupMember).where(GroupMember.organization_id == principal.organization_id, GroupMember.group_id == group_id, GroupMember.student_id == student_id, GroupMember.removed_at.is_(None)))
     if member is None:
         raise TuiroError("MEMBERSHIP_NOT_FOUND", "Active group membership not found.", 404)
-    member.removed_at = datetime.now(timezone.utc); db.commit()
+    member.removed_at = datetime.now(timezone.utc)
+    cs = db.scalar(select(ClassStudent).where(ClassStudent.organization_id == principal.organization_id, ClassStudent.class_id == group_id, ClassStudent.student_id == student_id))
+    if cs:
+        db.delete(cs)
+    db.commit()
 
 
 @router.get("/{group_id:uuid}/schedule")
@@ -214,6 +228,42 @@ def create_assignment(request: AssignmentInput, principal: Principal = Depends(r
     if request.overrides_id: _record(db, Assignment, principal.organization_id, request.overrides_id)
     item = Assignment(organization_id=principal.organization_id, created_by=principal.user.id, **request.model_dump(exclude={"attachments"}), attachments=json.dumps(request.attachments))
     db.add(item); db.commit(); db.refresh(item); return item
+
+
+@router.get("/assignments")
+def list_assignments(type: str | None = None, group_id: UUID | None = None, principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
+    query = select(Assignment).where(Assignment.organization_id == principal.organization_id)
+    if type:
+        query = query.where(Assignment.type == type)
+    if group_id:
+        query = query.where(Assignment.group_id == group_id)
+    query = query.order_by(Assignment.created_at.desc())
+    items = db.scalars(query).all()
+    results = []
+    for item in items:
+        group = db.get(Group, item.group_id) if item.group_id else None
+        student = db.get(Student, item.student_id) if item.student_id else None
+        target_name = group.name if group else (f"{student.first_name} {student.last_name}" if student else "Unknown")
+        results.append({
+            "id": str(item.id),
+            "title": item.title,
+            "description": item.description,
+            "due_date": item.due_date.isoformat() if item.due_date else None,
+            "type": item.type,
+            "group_id": str(item.group_id) if item.group_id else None,
+            "student_id": str(item.student_id) if item.student_id else None,
+            "target_name": target_name,
+            "source": "Group" if item.group_id else "Individual",
+            "created_at": item.created_at.isoformat() if item.created_at else None,
+        })
+    return results
+
+
+@router.delete("/assignments/{assignment_id:uuid}", status_code=204)
+def delete_assignment(assignment_id: UUID, principal: Principal = Depends(require_roles(*EDITORS)), db: Session = Depends(get_db)):
+    item = _record(db, Assignment, principal.organization_id, assignment_id)
+    db.delete(item)
+    db.commit()
 
 
 @router.post("/fees", status_code=201)
