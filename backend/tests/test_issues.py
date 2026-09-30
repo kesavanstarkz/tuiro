@@ -837,6 +837,23 @@ def test_i6_multi_org_login_refresh_and_switch(client: TestClient = None):
     assert res_bad_switch.status_code == 403
 
 
+def test_i12_secret_safeguards():
+    import pytest
+    from app.core.config import Settings, DEFAULT_JWT_SECRET
+
+    # 1. In development, default secret is accepted
+    dev_settings = Settings(environment="development", jwt_secret=DEFAULT_JWT_SECRET)
+    assert dev_settings.environment == "development"
+
+    # 2. In production with default secret, Settings raises ValueError
+    with pytest.raises(ValueError, match="JWT_SECRET must be set to a secure"):
+        Settings(environment="production", jwt_secret=DEFAULT_JWT_SECRET)
+
+    # 3. In production with secure secret, Settings succeeds
+    prod_settings = Settings(environment="production", jwt_secret="super-secure-production-secret-12345")
+    assert prod_settings.jwt_secret == "super-secure-production-secret-12345"
+
+
 
 
 

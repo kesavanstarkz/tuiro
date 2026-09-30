@@ -56,7 +56,7 @@ See [docs/mobile-endpoint-workflows.md](docs/mobile-endpoint-workflows.md) for t
 
 ## Environment variables
 
-Backend: `DATABASE_URL`, `JWT_SECRET`, `JWT_REFRESH_SECRET`, `ENVIRONMENT`, and `CORS_ORIGINS`.
+Backend: `DATABASE_URL`, `JWT_SECRET`, `ENVIRONMENT`, and `CORS_ORIGINS`.
 
 Mobile: `EXPO_PUBLIC_API_URL`. This value is public application configuration; never put database credentials, JWT secrets, provider tokens, or payment secrets in `EXPO_PUBLIC_*` variables.
 
@@ -72,4 +72,3 @@ cd ../mobile
 npm run typecheck
 npx expo-doctor
 ```
-# tuiro

@@ -20,6 +20,11 @@ web-build/
 .DS_Store
 .vscode/settings.json
 
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
 # Build artifacts
 coverage/
 *.log
