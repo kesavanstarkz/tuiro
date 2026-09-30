@@ -456,3 +456,40 @@ class OrganizationReceiptCounter(Base):
     year: Mapped[int] = mapped_column(Integer)
     last_number: Mapped[int] = mapped_column(Integer, default=0)
 
+
+class FeeReminderLog(Base):
+    __tablename__ = "fee_reminder_logs"
+    __table_args__ = (UniqueConstraint("organization_id", "fee_id", "sent_date", name="uq_reminder_fee_date"),)
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    organization_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    fee_id: Mapped[UUID] = mapped_column(ForeignKey("student_fees.id", ondelete="CASCADE"), index=True)
+    sent_date: Mapped[date] = mapped_column(Date)
+    channel: Mapped[str] = mapped_column(String(40), default="IN_APP")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class InviteCode(Base):
+    __tablename__ = "invite_codes"
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    organization_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    code: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    role: Mapped[str] = mapped_column(String(30))
+    email: Mapped[Optional[str]] = mapped_column(String(320))
+    phone: Mapped[Optional[str]] = mapped_column(String(40))
+    linked_student_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("students.id", ondelete="SET NULL"))
+    created_by: Mapped[UUID] = mapped_column(ForeignKey("users.id"))
+    used_by: Mapped[Optional[UUID]] = mapped_column(ForeignKey("users.id"))
+    used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PasswordResetToken(Base):
+    __tablename__ = "password_reset_tokens"
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+

@@ -47,6 +47,10 @@ type TabBarProps = {
 
 function MobileTabBar({ state, descriptors, navigation }: TabBarProps) {
     const insets = useSafeAreaInsets();
+    const { user } = useAuthStore();
+    const isParentOrStudent = user?.role === "PARENT" || user?.role === "STUDENT";
+    const visibleRoutes = state.routes.filter((route) => !(isParentOrStudent && route.name === "students"));
+
     return (
         <View style={[styles.tabShell, { paddingBottom: Math.max(insets.bottom, 10) }]}>
             {Platform.OS === "web" && (
@@ -64,7 +68,7 @@ function MobileTabBar({ state, descriptors, navigation }: TabBarProps) {
                 />
             )}
             <View style={styles.tabBar}>
-                {state.routes.map((route) => {
+                {visibleRoutes.map((route) => {
                     const focused = state.routes[state.index]?.key === route.key;
                     const options = descriptors[route.key].options;
                     const label = typeof options.tabBarLabel === "string" ? options.tabBarLabel : options.title ?? route.name;
@@ -109,13 +113,21 @@ function DesktopSidebar() {
         return pathname === cleanRoute || pathname.startsWith(cleanRoute + "/");
     };
 
-    const mainNav = [
-        { label: "Home", route: "/(app)/(tabs)/dashboard", icon: "view-dashboard-outline" as const, activeIcon: "view-dashboard" as const },
-        { label: "Students", route: "/(app)/(tabs)/students", icon: "account-school-outline" as const, activeIcon: "account-school" as const },
-        { label: "Attendance", route: "/(app)/(tabs)/attendance", icon: "calendar-check-outline" as const, activeIcon: "calendar-check" as const },
-        { label: "Fees", route: "/(app)/(tabs)/fees", icon: "cash-multiple" as const, activeIcon: "cash-multiple" as const },
-        { label: "Classes", route: "/classes", icon: "google-classroom" as const, activeIcon: "google-classroom" as const },
-    ];
+    const isParentOrStudent = user?.role === "PARENT" || user?.role === "STUDENT";
+
+    const mainNav = isParentOrStudent
+        ? [
+            { label: "Home", route: "/(app)/(tabs)/dashboard", icon: "view-dashboard-outline" as const, activeIcon: "view-dashboard" as const },
+            { label: "Attendance", route: "/(app)/(tabs)/attendance", icon: "calendar-check-outline" as const, activeIcon: "calendar-check" as const },
+            { label: "Fees", route: "/(app)/(tabs)/fees", icon: "cash-multiple" as const, activeIcon: "cash-multiple" as const },
+        ]
+        : [
+            { label: "Home", route: "/(app)/(tabs)/dashboard", icon: "view-dashboard-outline" as const, activeIcon: "view-dashboard" as const },
+            { label: "Students", route: "/(app)/(tabs)/students", icon: "account-school-outline" as const, activeIcon: "account-school" as const },
+            { label: "Attendance", route: "/(app)/(tabs)/attendance", icon: "calendar-check-outline" as const, activeIcon: "calendar-check" as const },
+            { label: "Fees", route: "/(app)/(tabs)/fees", icon: "cash-multiple" as const, activeIcon: "cash-multiple" as const },
+            { label: "Classes", route: "/classes", icon: "google-classroom" as const, activeIcon: "google-classroom" as const },
+        ];
 
     const academicNav = [
         { label: "Homework", route: "/homework", icon: "book-open-page-variant-outline" as const },
@@ -134,11 +146,16 @@ function DesktopSidebar() {
         { label: "Reports", route: "/reports", icon: "chart-line" as const },
     ];
 
-    const systemNav = [
-        { label: "Notifications", route: "/notifications", icon: "bell-outline" as const },
-        { label: "Subscription", route: "/subscription", icon: "star-outline" as const },
-        { label: "Settings", route: "/settings", icon: "cog-outline" as const },
-    ];
+    const systemNav = isParentOrStudent
+        ? [
+            { label: "Notifications", route: "/notifications", icon: "bell-outline" as const },
+            { label: "Settings", route: "/settings", icon: "cog-outline" as const },
+        ]
+        : [
+            { label: "Notifications", route: "/notifications", icon: "bell-outline" as const },
+            { label: "Subscription", route: "/subscription", icon: "star-outline" as const },
+            { label: "Settings", route: "/settings", icon: "cog-outline" as const },
+        ];
 
     return (
         <View style={styles.sidebar}>
@@ -185,39 +202,43 @@ function DesktopSidebar() {
                     })}
                 </View>
 
-                <Text style={styles.sidebarSectionTitle}>PEOPLE</Text>
-                <View style={styles.sidebarGroup}>
-                    {peopleNav.map((item) => {
-                        const active = isItemActive(item.route);
-                        return (
-                            <Pressable
-                                key={item.route}
-                                onPress={() => router.push(item.route as never)}
-                                style={({ pressed }) => [styles.sidebarItem, active && styles.sidebarItemActive, pressed && styles.pressed]}
-                            >
-                                <MaterialCommunityIcons name={item.icon} size={19} color={active ? colors.white : colors.textSecondary} />
-                                <Text style={[styles.sidebarItemText, active && styles.sidebarItemTextActive]}>{item.label}</Text>
-                            </Pressable>
-                        );
-                    })}
-                </View>
+                {!isParentOrStudent && (
+                    <>
+                        <Text style={styles.sidebarSectionTitle}>PEOPLE</Text>
+                        <View style={styles.sidebarGroup}>
+                            {peopleNav.map((item) => {
+                                const active = isItemActive(item.route);
+                                return (
+                                    <Pressable
+                                        key={item.route}
+                                        onPress={() => router.push(item.route as never)}
+                                        style={({ pressed }) => [styles.sidebarItem, active && styles.sidebarItemActive, pressed && styles.pressed]}
+                                    >
+                                        <MaterialCommunityIcons name={item.icon} size={19} color={active ? colors.white : colors.textSecondary} />
+                                        <Text style={[styles.sidebarItemText, active && styles.sidebarItemTextActive]}>{item.label}</Text>
+                                    </Pressable>
+                                );
+                            })}
+                        </View>
 
-                <Text style={styles.sidebarSectionTitle}>BUSINESS</Text>
-                <View style={styles.sidebarGroup}>
-                    {businessNav.map((item) => {
-                        const active = isItemActive(item.route);
-                        return (
-                            <Pressable
-                                key={item.route}
-                                onPress={() => router.push(item.route as never)}
-                                style={({ pressed }) => [styles.sidebarItem, active && styles.sidebarItemActive, pressed && styles.pressed]}
-                            >
-                                <MaterialCommunityIcons name={item.icon} size={19} color={active ? colors.white : colors.textSecondary} />
-                                <Text style={[styles.sidebarItemText, active && styles.sidebarItemTextActive]}>{item.label}</Text>
-                            </Pressable>
-                        );
-                    })}
-                </View>
+                        <Text style={styles.sidebarSectionTitle}>BUSINESS</Text>
+                        <View style={styles.sidebarGroup}>
+                            {businessNav.map((item) => {
+                                const active = isItemActive(item.route);
+                                return (
+                                    <Pressable
+                                        key={item.route}
+                                        onPress={() => router.push(item.route as never)}
+                                        style={({ pressed }) => [styles.sidebarItem, active && styles.sidebarItemActive, pressed && styles.pressed]}
+                                    >
+                                        <MaterialCommunityIcons name={item.icon} size={19} color={active ? colors.white : colors.textSecondary} />
+                                        <Text style={[styles.sidebarItemText, active && styles.sidebarItemTextActive]}>{item.label}</Text>
+                                    </Pressable>
+                                );
+                            })}
+                        </View>
+                    </>
+                )}
 
                 <Text style={styles.sidebarSectionTitle}>SYSTEM</Text>
                 <View style={styles.sidebarGroup}>

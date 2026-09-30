@@ -1243,3 +1243,238 @@ def test_f1_online_payment_flow():
 
 
 
+
+
+def test_f2_fee_reminders():
+    """F-2: send_fee_reminders marks due fees and respects dedup."""
+    from datetime import date, timedelta
+    from app.db import SessionLocal
+    from app.models import Organization, OrganizationMember, Student, StudentFee, FeeReminderLog, Notification
+    from app.commands.send_fee_reminders import run_reminders
+    from app.core.security import hash_password
+    from sqlalchemy import select
+    import json
+
+    db = SessionLocal()
+    org = Organization(name=f"Reminder Org {uuid4().hex[:6]}", currency_code="USD")
+    db.add(org)
+    db.flush()
+
+    from app.models import User
+    u = User(email=f"rem-{uuid4().hex}@example.com", display_name="Remind Owner", password_hash=hash_password("x"))
+    db.add(u)
+    db.flush()
+    db.add(OrganizationMember(user_id=u.id, organization_id=org.id, role="OWNER"))
+
+    stu = Student(organization_id=org.id, first_name="Rem", last_name="Student", student_number=f"RST-{uuid4().hex[:6]}", status="ACTIVE")
+    db.add(stu)
+    db.flush()
+
+    # Fee due in 3 days (matches default remind_days_before=[7,3,1])
+    today = date.today()
+    due_date = today + timedelta(days=3)
+    fee = StudentFee(organization_id=org.id, student_id=stu.id, billing_period=f"REM-{uuid4().hex[:6]}", amount=500, amount_due=500, due_date=due_date, status="PENDING")
+    db.add(fee)
+    db.commit()
+
+    # Run reminders — should send 1
+    sent = run_reminders(dry_run=False)
+    assert sent >= 1
+
+    # Check notification was created
+    notifs = db.scalars(select(Notification).where(Notification.organization_id == org.id, Notification.notification_type == "FEE_REMINDER")).all()
+    assert len(notifs) >= 1
+
+    # Check dedup log was created
+    logs = db.scalars(select(FeeReminderLog).where(FeeReminderLog.fee_id == fee.id)).all()
+    assert len(logs) == 1
+    assert logs[0].sent_date == today
+
+    # Run again — dedup should prevent double send
+    sent2 = run_reminders(dry_run=False)
+    logs2 = db.scalars(select(FeeReminderLog).where(FeeReminderLog.fee_id == fee.id)).all()
+    assert len(logs2) == 1  # Still 1 — not duplicated
+
+    db.close()
+
+
+def test_f4_invite_flow():
+    """F-4: OWNER creates invite, invitee accepts, joins org with correct role."""
+    c = TestClient(app)
+
+    # Owner registers
+    email = f"f4owner-{uuid4().hex}@example.com"
+    reg = c.post("/api/v1/auth/register", json={
+        "email": email,
+        "password": "password123",
+        "display_name": "F4 Owner",
+        "organization_name": "F4 Org",
+    })
+    assert reg.status_code == 201
+    token = reg.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # 1. Create invite for TEACHER role
+    inv_res = c.post("/api/v1/auth/invites", json={
+        "role": "TEACHER",
+        "email": f"f4teacher-{uuid4().hex}@example.com",
+    }, headers=headers)
+    assert inv_res.status_code == 201, inv_res.text
+    invite_data = inv_res.json()
+    assert "code" in invite_data
+    code = invite_data["code"]
+
+    # 2. List invites
+    list_res = c.get("/api/v1/auth/invites", headers=headers)
+    assert list_res.status_code == 200
+    assert any(i["code"] == code for i in list_res.json())
+
+    # 3. Accept invite (no auth needed)
+    accept_res = c.post("/api/v1/auth/invites/accept", json={
+        "code": code,
+        "display_name": "New Teacher",
+        "password": "securepass123",
+    })
+    assert accept_res.status_code == 200, accept_res.text
+    teacher_token = accept_res.json()["access_token"]
+    assert teacher_token is not None
+
+    # 4. Teacher can access teacher-allowed endpoints
+    teacher_headers = {"Authorization": f"Bearer {teacher_token}"}
+    me_res = c.get("/api/v1/me", headers=teacher_headers)
+    assert me_res.status_code == 200
+    assert me_res.json()["role"] == "TEACHER"
+
+    # 5. Cannot reuse the same code
+    reuse_res = c.post("/api/v1/auth/invites/accept", json={
+        "code": code,
+        "display_name": "Attacker",
+        "password": "securepass123",
+        "email": f"attacker-{uuid4().hex}@example.com",
+    })
+    assert reuse_res.status_code == 410  # INVITE_EXPIRED
+
+    # 6. TEACHER cannot create invites (requires OWNER/ADMIN)
+    bad_inv = c.post("/api/v1/auth/invites", json={"role": "STUDENT"}, headers=teacher_headers)
+    assert bad_inv.status_code == 403
+
+
+def test_f5_password_reset():
+    """F-5: request reset token, use it to change password, revoke sessions."""
+    c = TestClient(app)
+    import logging
+
+    email = f"f5user-{uuid4().hex}@example.com"
+    reg = c.post("/api/v1/auth/register", json={
+        "email": email,
+        "password": "oldpassword123",
+        "display_name": "F5 User",
+        "organization_name": "F5 Org",
+    })
+    assert reg.status_code == 201
+    old_refresh = reg.json()["refresh_token"]
+
+    # 1. Request reset — should always return 204 even for unknown email
+    res1 = c.post("/api/v1/auth/password-reset/request", json={"email": "nonexistent@example.com"})
+    assert res1.status_code == 204
+
+    # 2. Request for real email
+    from app.services import invite_reset
+    res2 = c.post("/api/v1/auth/password-reset/request", json={"email": email})
+    assert res2.status_code == 204
+
+    raw_token = invite_reset._last_reset_token
+    assert raw_token is not None, "No reset token was generated"
+
+    # 3. Use token to reset password
+    res3 = c.post("/api/v1/auth/password-reset/complete", json={
+        "token": raw_token,
+        "new_password": "newpassword456",
+    })
+    assert res3.status_code == 204
+
+    # 4. Old refresh token should be revoked
+    refresh_res = c.post("/api/v1/auth/refresh", json={"refresh_token": old_refresh})
+    assert refresh_res.status_code == 401
+
+    # 5. Login with new password works
+    login_res = c.post("/api/v1/auth/login", json={"email": email, "password": "newpassword456"})
+    assert login_res.status_code == 200
+    assert login_res.json()["access_token"] is not None
+
+    # 6. Reusing the token fails
+    res4 = c.post("/api/v1/auth/password-reset/complete", json={
+        "token": raw_token,
+        "new_password": "anotherpassword789",
+    })
+    assert res4.status_code == 400
+
+
+def test_f6_reports_export_and_report_cards(client: TestClient = None):
+    c = client or TestClient(app)
+    email = f"f6-{uuid4().hex}@example.com"
+    reg = c.post("/api/v1/auth/register", json={
+        "email": email,
+        "password": "password123",
+        "display_name": "F6 Owner",
+        "organization_name": "F6 Org",
+    })
+    assert reg.status_code == 201
+    token = reg.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # 1. Setup class, student, enroll
+    cls_res = c.post("/api/v1/classes", json={"name": "Chemistry", "fee_amount": 250.0}, headers=headers)
+    assert cls_res.status_code == 201
+    class_id = cls_res.json()["id"]
+
+    stu_res = c.post("/api/v1/students", json={"first_name": "Maria", "last_name": "Curie", "student_number": f"F6STU-{uuid4().hex[:6]}"}, headers=headers)
+    assert stu_res.status_code == 201
+    student_id = stu_res.json()["id"]
+
+    c.post(f"/api/v1/classes/{class_id}/students", json={"student_id": student_id}, headers=headers)
+
+    # 2. Add test & mark
+    t_res = c.post("/api/v1/tests", json={"class_id": class_id, "name": "Periodic Table", "subject": "Chemistry", "test_date": "2026-11-20", "maximum_marks": 100}, headers=headers)
+    assert t_res.status_code == 201
+    test_id = t_res.json()["id"]
+
+    m_res = c.post(f"/api/v1/tests/{test_id}/marks", json={"student_id": student_id, "marks": 95, "grade": "A+", "remarks": "Top score"}, headers=headers)
+    assert m_res.status_code == 201
+
+    # 3. Add attendance
+    att_res = c.post("/api/v1/attendance/sessions", json={
+        "class_id": class_id,
+        "session_date": "2026-11-20",
+        "records": [{"student_id": student_id, "status": "PRESENT"}],
+    }, headers=headers)
+    assert att_res.status_code == 201
+
+    # 4. Check Report Card: GET /reports/students/{id}/report-card
+    rc_res = c.get(f"/api/v1/reports/students/{student_id}/report-card", headers=headers)
+    assert rc_res.status_code == 200, rc_res.text
+    rc = rc_res.json()
+    assert rc["student"]["first_name"] == "Maria"
+    assert len(rc["tests"]) == 1
+    assert rc["tests"][0]["marks_obtained"] == 95.0
+    assert rc["tests"][0]["percentage"] == 95.0
+    assert rc["summary"]["overall_percentage"] == 95.0
+    assert rc["summary"]["total_sessions"] == 1
+    assert rc["summary"]["attendance_percentage"] == 100.0
+
+    # 5. Check Audit Logs: GET /reports/audit-logs
+    audit_res = c.get("/api/v1/reports/audit-logs", headers=headers)
+    assert audit_res.status_code == 200, audit_res.text
+    logs = audit_res.json()
+    assert len(logs) >= 1
+    actions = [l["action"] for l in logs]
+    assert "attendance_saved" in actions
+
+    # 6. Check CSV exports
+    fee_csv = c.get("/api/v1/reports/fees/export.csv", headers=headers)
+    assert fee_csv.status_code == 200
+    assert "text/csv" in fee_csv.headers["content-type"]
+
+    att_csv = c.get("/api/v1/reports/attendance/export.csv", headers=headers)
+    assert att_csv.status_code == 200
+    assert "text/csv" in att_csv.headers["content-type"]

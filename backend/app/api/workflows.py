@@ -25,7 +25,7 @@ from app.core.permissions import (
 )
 from app.core.timezone import get_org_now, get_org_today
 from app.db import get_db
-from app.models import AcademicTest, AttendanceRecord, AttendanceSession, AuditLog, ClassGroup, ClassStudent, ClassTeacher, GroupAttendanceRecord, GroupAttendanceSession, GroupMember, Homework, Notification, Organization, OrganizationMember, Payment, Receipt, ScheduleEntry, Student, StudentFee, StudentParent, Parent, Teacher, TestMark
+from app.models import AcademicTest, AttendanceRecord, AttendanceSession, AuditLog, ClassGroup, ClassStudent, ClassTeacher, GroupAttendanceRecord, GroupAttendanceSession, GroupMember, Homework, Notification, Organization, OrganizationMember, Payment, Receipt, ScheduleEntry, Student, StudentFee, StudentParent, Parent, Teacher, TestMark, User
 from app.services.payment_provider import get_payment_provider
 from app.services.receipts import build_receipt_pdf, generate_receipt_number
 
@@ -1065,6 +1065,114 @@ def export_attendance_report(principal: Principal = Depends(require_roles("OWNER
 
     rows = [[s_date, c_id, s_id, status] for (s_date, c_id, s_id), status in sorted(merged.items(), key=lambda x: x[0][0])]
     return _csv_response("tuiro-attendance.csv", ["date", "class_id", "student_id", "status"], rows)
+
+
+@router.get("/reports/audit-logs")
+def get_audit_logs(
+    limit: int = 100,
+    offset: int = 0,
+    entity_type: str | None = None,
+    principal: Principal = Depends(require_roles("OWNER", "ADMIN")),
+    db: Session = Depends(get_db),
+):
+    query = select(AuditLog).where(AuditLog.organization_id == principal.organization_id).order_by(AuditLog.created_at.desc())
+    if entity_type:
+        query = query.where(AuditLog.entity_type == entity_type)
+    logs = db.scalars(query.offset(offset).limit(min(limit, 200))).all()
+    res = []
+    for log in logs:
+        user = db.get(User, log.user_id) if log.user_id else None
+        res.append({
+            "id": log.id,
+            "action": log.action,
+            "entity_type": log.entity_type,
+            "entity_id": log.entity_id,
+            "user_id": log.user_id,
+            "user_name": user.display_name if user else "System",
+            "created_at": log.created_at,
+        })
+    return res
+
+
+@router.get("/reports/students/{student_id}/report-card")
+def get_student_report_card(
+    student_id: UUID,
+    principal: Principal = Depends(require_roles("OWNER", "ADMIN", "TEACHER", "PARENT", "STUDENT")),
+    db: Session = Depends(get_db),
+):
+    student = _org_record(db, Student, principal.organization_id, student_id)
+    check_parent_student_access(db, principal, student_id)
+    check_student_self_access(db, principal, student_id)
+
+    marks_query = (
+        select(TestMark, AcademicTest)
+        .join(AcademicTest, TestMark.test_id == AcademicTest.id)
+        .where(
+            TestMark.organization_id == principal.organization_id,
+            TestMark.student_id == student_id,
+        )
+        .order_by(AcademicTest.test_date.desc())
+    )
+    test_results = []
+    total_obtained = Decimal("0")
+    total_max = Decimal("0")
+
+    for tm, t in db.execute(marks_query).all():
+        pct = float(round((tm.marks / t.maximum_marks) * 100, 1)) if t.maximum_marks > 0 else 0.0
+        total_obtained += tm.marks
+        total_max += t.maximum_marks
+        test_results.append({
+            "test_id": t.id,
+            "test_name": t.name,
+            "subject": t.subject,
+            "test_date": t.test_date,
+            "maximum_marks": float(t.maximum_marks),
+            "marks_obtained": float(tm.marks),
+            "percentage": pct,
+            "grade": tm.grade,
+            "remarks": tm.remarks,
+        })
+
+    overall_percentage = float(round((total_obtained / total_max) * 100, 1)) if total_max > 0 else 0.0
+
+    class_att = db.scalars(
+        select(AttendanceRecord)
+        .join(AttendanceSession, AttendanceRecord.session_id == AttendanceSession.id)
+        .where(
+            AttendanceSession.organization_id == principal.organization_id,
+            AttendanceRecord.student_id == student_id,
+        )
+    ).all()
+    group_att = db.scalars(
+        select(GroupAttendanceRecord)
+        .join(GroupAttendanceSession, GroupAttendanceRecord.session_id == GroupAttendanceSession.id)
+        .where(
+            GroupAttendanceSession.organization_id == principal.organization_id,
+            GroupAttendanceRecord.student_id == student_id,
+        )
+    ).all()
+
+    total_sessions = len(class_att) + len(group_att)
+    present_sessions = sum(1 for a in class_att if a.status == "PRESENT") + sum(1 for a in group_att if a.status == "PRESENT")
+    att_percentage = float(round((present_sessions / total_sessions) * 100, 1)) if total_sessions > 0 else 100.0
+
+    return {
+        "student": {
+            "id": student.id,
+            "first_name": student.first_name,
+            "last_name": student.last_name,
+            "student_number": student.student_number,
+        },
+        "tests": test_results,
+        "summary": {
+            "total_marks_obtained": float(total_obtained),
+            "total_maximum_marks": float(total_max),
+            "overall_percentage": overall_percentage,
+            "total_sessions": total_sessions,
+            "present_sessions": present_sessions,
+            "attendance_percentage": att_percentage,
+        },
+    }
 
 
 class SettingsInput(BaseModel):
