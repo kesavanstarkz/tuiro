@@ -1107,8 +1107,136 @@ def test_r3_endpoints_and_navigation(client: TestClient = None):
     assert float(pay_detail.json()["amount"]) == 300.0
 
 
+def test_f1_online_payment_flow():
+    import hashlib
+    import hmac
+    from decimal import Decimal
+    from app.services.payment_provider import PaymentProvider, set_payment_provider
+    from typing import Any, Optional
 
+    _MOCK_SECRET = "mock_secret"
 
+    class MockProvider(PaymentProvider):
+        @property
+        def name(self) -> str:
+            return "mock"
+
+        def is_configured(self) -> bool:
+            return True
+
+        def get_public_config(self) -> dict:
+            return {"enabled": True, "provider": "mock", "key_id": "mock_key"}
+
+        def create_order(self, amount, currency, receipt, notes=None) -> dict:
+            return {
+                "id": f"order_mock_{receipt[:8]}",
+                "entity": "order",
+                "amount": int(amount * 100),
+                "amount_paid": 0,
+                "amount_due": int(amount * 100),
+                "currency": currency.upper(),
+                "receipt": receipt,
+                "status": "created",
+                "notes": notes or {},
+            }
+
+        def verify_signature(self, order_id: str, payment_id: str, signature: str) -> bool:
+            msg = f"{order_id}|{payment_id}".encode()
+            expected = hmac.new(_MOCK_SECRET.encode(), msg, hashlib.sha256).hexdigest()
+            return hmac.compare_digest(expected, signature)
+
+        def verify_webhook(self, payload_body: bytes, signature: str) -> bool:
+            expected = hmac.new(_MOCK_SECRET.encode(), payload_body, hashlib.sha256).hexdigest()
+            return hmac.compare_digest(expected, signature)
+
+    c = TestClient(app)
+    email = f"f1-{uuid4().hex}@example.com"
+    reg = c.post("/api/v1/auth/register", json={
+        "email": email,
+        "password": "password123",
+        "display_name": "F1 Owner",
+        "organization_name": "F1 Org",
+    })
+    assert reg.status_code == 201
+    token = reg.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # 1. Config disabled when no provider configured
+    set_payment_provider(None)
+    cfg_res = c.get("/api/v1/payments/config", headers=headers)
+    assert cfg_res.status_code == 200
+    assert cfg_res.json()["enabled"] is False
+
+    # 2. Config enabled after injecting mock
+    set_payment_provider(MockProvider())
+    cfg_res2 = c.get("/api/v1/payments/config", headers=headers)
+    assert cfg_res2.status_code == 200
+    assert cfg_res2.json()["enabled"] is True
+    assert cfg_res2.json()["key_id"] == "mock_key"
+
+    # 3. Create student, class, fee
+    cls_r = c.post("/api/v1/classes", json={"name": "F1 Batch", "fee_amount": 500.0}, headers=headers)
+    assert cls_r.status_code == 201
+    class_id = cls_r.json()["id"]
+
+    stu_r = c.post("/api/v1/students", json={"first_name": "Fee", "last_name": "Tester", "student_number": f"F1STU-{uuid4().hex[:6]}"}, headers=headers)
+    assert stu_r.status_code == 201
+    student_id = stu_r.json()["id"]
+
+    c.post(f"/api/v1/classes/{class_id}/students", json={"student_id": student_id}, headers=headers)
+
+    fee_gen = c.post("/api/v1/fees/generate", json={"billing_period": f"F1-{uuid4().hex[:6]}", "amount": 500.0, "due_date": "2026-12-01"}, headers=headers)
+    assert fee_gen.status_code == 200
+    fees_list = c.get(f"/api/v1/fees?student_id={student_id}", headers=headers).json()
+    assert len(fees_list) >= 1
+    fee_id = fees_list[0]["id"]
+
+    # 4. POST /payments/create-order
+    order_res = c.post("/api/v1/payments/create-order", json={"fee_id": fee_id}, headers=headers)
+    assert order_res.status_code == 200, order_res.text
+    order_data = order_res.json()
+    assert "order_id" in order_data
+    assert order_data["key_id"] == "mock_key"
+    order_id = order_data["order_id"]
+
+    # 5. POST /payments/verify — compute valid mock signature
+    payment_id = f"pay_mock_{uuid4().hex[:12]}"
+    sig_msg = f"{order_id}|{payment_id}".encode()
+    signature = hmac.new(_MOCK_SECRET.encode(), sig_msg, hashlib.sha256).hexdigest()
+
+    verify_res = c.post("/api/v1/payments/verify", json={
+        "fee_id": fee_id,
+        "order_id": order_id,
+        "payment_id": payment_id,
+        "signature": signature,
+    }, headers=headers)
+    assert verify_res.status_code == 201, verify_res.text
+    verify_data = verify_res.json()
+    assert verify_data["fee_status"] == "PAID"
+    assert "receipt" in verify_data
+    assert verify_data["remaining"] == 0
+
+    # 6. Payment appears in GET /payments list
+    payments_list = c.get("/api/v1/payments", headers=headers).json()
+    payment_ids = [p["id"] for p in payments_list]
+    assert verify_data["payment"]["id"] in payment_ids
+
+    # 7. Fee is now PAID
+    fee_detail = c.get(f"/api/v1/fees/{fee_id}", headers=headers).json()
+    assert fee_detail["status"] == "PAID"
+
+    # 8. Idempotency — same payment_id returns existing payment
+    verify_res2 = c.post("/api/v1/payments/verify", json={
+        "fee_id": fee_id,
+        "order_id": order_id,
+        "payment_id": payment_id,
+        "signature": signature,
+    }, headers=headers)
+    assert verify_res2.status_code == 201
+    assert verify_res2.json()["payment"]["id"] == verify_data["payment"]["id"]
+
+    # Cleanup
+    set_payment_provider(None)
 
 
 

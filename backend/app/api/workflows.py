@@ -5,10 +5,11 @@ from decimal import Decimal
 from uuid import UUID
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 from io import BytesIO, StringIO
 import csv
+import json
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -24,7 +25,8 @@ from app.core.permissions import (
 )
 from app.core.timezone import get_org_now, get_org_today
 from app.db import get_db
-from app.models import AcademicTest, AttendanceRecord, AttendanceSession, AuditLog, ClassGroup, ClassStudent, ClassTeacher, GroupAttendanceRecord, GroupAttendanceSession, GroupMember, Homework, Notification, Organization, Payment, Receipt, ScheduleEntry, Student, StudentFee, StudentParent, Parent, Teacher, TestMark
+from app.models import AcademicTest, AttendanceRecord, AttendanceSession, AuditLog, ClassGroup, ClassStudent, ClassTeacher, GroupAttendanceRecord, GroupAttendanceSession, GroupMember, Homework, Notification, Organization, OrganizationMember, Payment, Receipt, ScheduleEntry, Student, StudentFee, StudentParent, Parent, Teacher, TestMark
+from app.services.payment_provider import get_payment_provider
 from app.services.receipts import build_receipt_pdf, generate_receipt_number
 
 router = APIRouter()
@@ -60,6 +62,17 @@ class PaymentInput(BaseModel):
     payment_method: str = "OTHER"
     transaction_reference: str | None = None
     notes: str | None = None
+
+
+class CreateOrderInput(BaseModel):
+    fee_id: UUID
+
+
+class VerifyPaymentInput(BaseModel):
+    fee_id: UUID
+    order_id: str
+    payment_id: str
+    signature: str
 
 
 class HomeworkInput(BaseModel):
@@ -292,32 +305,258 @@ def get_fee(fee_id: UUID, principal: Principal = Depends(require_roles("OWNER", 
     return _fee_payload(db, fee)
 
 
-@router.post("/payments", status_code=201)
-def record_payment(request: PaymentInput, principal: Principal = Depends(require_roles("OWNER", "ADMIN")), db: Session = Depends(get_db)):
+def process_fee_payment(
+    db: Session,
+    organization_id: UUID,
+    fee_id: UUID,
+    amount: Decimal,
+    payment_method: str,
+    transaction_reference: str | None,
+    recorded_by_user_id: UUID,
+    payment_date: date | None = None,
+    notes: str | None = None,
+) -> dict:
+    organization = db.get(Organization, organization_id)
+    pay_date = payment_date or get_org_today(organization)
+
     fee = db.scalar(
         select(StudentFee)
-        .where(StudentFee.id == request.fee_id, StudentFee.organization_id == principal.organization_id)
+        .where(StudentFee.id == fee_id, StudentFee.organization_id == organization_id)
         .with_for_update()
     )
     if fee is None:
         raise TuiroError("RESOURCE_NOT_FOUND", "The requested resource was not found.", 404)
-    if request.transaction_reference and db.scalar(select(Payment).where(Payment.organization_id == principal.organization_id, Payment.transaction_reference == request.transaction_reference)):
-        raise TuiroError("DUPLICATE_PAYMENT", "This transaction reference has already been recorded.", 409)
-    paid = db.scalar(select(func.coalesce(func.sum(Payment.amount), 0)).where(Payment.fee_id == fee.id)) or Decimal("0")
+
+    # Check for idempotent retry if transaction_reference is provided
+    if transaction_reference:
+        existing_payment = db.scalar(
+            select(Payment).where(
+                Payment.organization_id == organization_id,
+                Payment.transaction_reference == transaction_reference,
+            )
+        )
+        if existing_payment:
+            existing_receipt = db.scalar(
+                select(Receipt).where(Receipt.payment_id == existing_payment.id)
+            )
+            paid_sum = db.scalar(
+                select(func.coalesce(func.sum(Payment.amount), 0)).where(Payment.fee_id == fee.id)
+            ) or Decimal("0")
+            return {
+                "payment": _payment_payload(db, existing_payment),
+                "receipt": existing_receipt,
+                "fee_status": fee.status,
+                "remaining": max(Decimal("0"), fee.amount_due - paid_sum),
+            }
+
+    paid = db.scalar(
+        select(func.coalesce(func.sum(Payment.amount), 0)).where(Payment.fee_id == fee.id)
+    ) or Decimal("0")
     outstanding = fee.amount_due - paid
-    if request.amount > outstanding:
+    if amount > outstanding:
         raise TuiroError("PAYMENT_EXCEEDS_BALANCE", "Payment is greater than the outstanding balance.", 400)
-    payment = Payment(organization_id=principal.organization_id, fee_id=fee.id, student_id=fee.student_id, amount=request.amount, payment_date=request.payment_date, payment_method=request.payment_method, transaction_reference=request.transaction_reference, notes=request.notes, recorded_by=principal.user.id)
+
+    payment = Payment(
+        organization_id=organization_id,
+        fee_id=fee.id,
+        student_id=fee.student_id,
+        amount=amount,
+        payment_date=pay_date,
+        payment_method=payment_method,
+        transaction_reference=transaction_reference,
+        notes=notes,
+        recorded_by=recorded_by_user_id,
+    )
     db.add(payment)
     db.flush()
-    new_paid = paid + request.amount
-    fee.status = "PAID" if new_paid == fee.amount_due else "PARTIAL"
-    receipt_number = generate_receipt_number(db, principal.organization_id)
-    receipt = Receipt(organization_id=principal.organization_id, payment_id=payment.id, receipt_number=receipt_number)
+
+    new_paid = paid + amount
+    fee.status = "PAID" if new_paid >= fee.amount_due else "PARTIAL"
+
+    receipt_number = generate_receipt_number(db, organization_id)
+    receipt = Receipt(
+        organization_id=organization_id,
+        payment_id=payment.id,
+        receipt_number=receipt_number,
+    )
     db.add(receipt)
-    db.add(AuditLog(organization_id=principal.organization_id, user_id=principal.user.id, action="payment_created", entity_type="payment", entity_id=payment.id))
+    db.add(AuditLog(
+        organization_id=organization_id,
+        user_id=recorded_by_user_id,
+        action="payment_created",
+        entity_type="payment",
+        entity_id=payment.id,
+    ))
     db.commit()
-    return {"payment": _payment_payload(db, payment), "receipt": receipt, "fee_status": fee.status, "remaining": fee.amount_due - new_paid}
+    return {
+        "payment": _payment_payload(db, payment),
+        "receipt": receipt,
+        "fee_status": fee.status,
+        "remaining": max(Decimal("0"), fee.amount_due - new_paid),
+    }
+
+
+@router.get("/payments/config")
+def payment_config(
+    principal: Principal = Depends(require_roles("OWNER", "ADMIN", "TEACHER", "PARENT", "STUDENT")),
+):
+    provider = get_payment_provider()
+    return provider.get_public_config()
+
+
+@router.post("/payments/create-order")
+def create_payment_order(
+    request: CreateOrderInput,
+    principal: Principal = Depends(require_roles("OWNER", "ADMIN", "PARENT", "STUDENT")),
+    db: Session = Depends(get_db),
+):
+    provider = get_payment_provider()
+    if not provider.is_configured():
+        raise TuiroError("PAYMENTS_NOT_CONFIGURED", "Online payment provider is not configured.", 400)
+
+    fee = _org_record(db, StudentFee, principal.organization_id, request.fee_id)
+    if principal.role == "PARENT":
+        student_ids = get_parent_student_ids(db, principal)
+        if fee.student_id not in student_ids:
+            raise TuiroError("RESOURCE_NOT_FOUND", "The requested resource was not found.", 404)
+    elif principal.role == "STUDENT":
+        student_id = get_student_self_id(db, principal)
+        if fee.student_id != student_id:
+            raise TuiroError("RESOURCE_NOT_FOUND", "The requested resource was not found.", 404)
+
+    paid = db.scalar(select(func.coalesce(func.sum(Payment.amount), 0)).where(Payment.fee_id == fee.id)) or Decimal("0")
+    remaining = fee.amount_due - paid
+    if remaining <= Decimal("0"):
+        raise TuiroError("FEE_ALREADY_PAID", "This fee is already fully settled.", 400)
+
+    organization = db.get(Organization, principal.organization_id)
+    currency = organization.currency_code if organization else "USD"
+
+    order = provider.create_order(
+        amount=remaining,
+        currency=currency,
+        receipt=f"FEE-{fee.id.hex[:12]}",
+        notes={
+            "fee_id": str(fee.id),
+            "organization_id": str(principal.organization_id),
+            "student_id": str(fee.student_id),
+            "user_id": str(principal.user.id),
+        },
+    )
+    return {
+        "order_id": order["id"],
+        "amount": remaining,
+        "amount_subunit": order["amount"],
+        "currency": currency,
+        "key_id": provider.get_public_config().get("key_id"),
+        "fee_id": fee.id,
+    }
+
+
+@router.post("/payments/verify", status_code=201)
+def verify_payment(
+    request: VerifyPaymentInput,
+    principal: Principal = Depends(require_roles("OWNER", "ADMIN", "PARENT", "STUDENT")),
+    db: Session = Depends(get_db),
+):
+    provider = get_payment_provider()
+    if not provider.is_configured():
+        raise TuiroError("PAYMENTS_NOT_CONFIGURED", "Online payment provider is not configured.", 400)
+
+    if not provider.verify_signature(request.order_id, request.payment_id, request.signature):
+        raise TuiroError("INVALID_SIGNATURE", "Payment signature verification failed.", 400)
+
+    fee = _org_record(db, StudentFee, principal.organization_id, request.fee_id)
+    if principal.role == "PARENT":
+        student_ids = get_parent_student_ids(db, principal)
+        if fee.student_id not in student_ids:
+            raise TuiroError("RESOURCE_NOT_FOUND", "The requested resource was not found.", 404)
+    elif principal.role == "STUDENT":
+        student_id = get_student_self_id(db, principal)
+        if fee.student_id != student_id:
+            raise TuiroError("RESOURCE_NOT_FOUND", "The requested resource was not found.", 404)
+
+    paid = db.scalar(select(func.coalesce(func.sum(Payment.amount), 0)).where(Payment.fee_id == fee.id)) or Decimal("0")
+    remaining = max(Decimal("0"), fee.amount_due - paid)
+
+    return process_fee_payment(
+        db=db,
+        organization_id=principal.organization_id,
+        fee_id=fee.id,
+        amount=remaining,
+        payment_method="ONLINE",
+        transaction_reference=request.payment_id,
+        recorded_by_user_id=principal.user.id,
+        notes=f"Razorpay Order ID: {request.order_id}",
+    )
+
+
+@router.post("/payments/webhook")
+async def payment_webhook(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    provider = get_payment_provider()
+    signature = request.headers.get("X-Razorpay-Signature", "")
+    body_bytes = await request.body()
+
+    if not provider.verify_webhook(body_bytes, signature):
+        raise TuiroError("INVALID_SIGNATURE", "Invalid webhook signature.", 400)
+
+    event_data = json.loads(body_bytes.decode("utf-8"))
+    event_type = event_data.get("event")
+
+    if event_type in ("payment.captured", "order.paid"):
+        payload_entity = event_data.get("payload", {}).get("payment", {}).get("entity", {})
+        if not payload_entity:
+            payload_entity = event_data.get("payload", {}).get("order", {}).get("entity", {})
+
+        notes = payload_entity.get("notes", {})
+        fee_id_str = notes.get("fee_id")
+        org_id_str = notes.get("organization_id")
+        user_id_str = notes.get("user_id")
+
+        if fee_id_str and org_id_str:
+            fee_id = UUID(fee_id_str)
+            org_id = UUID(org_id_str)
+            payment_id = payload_entity.get("id") or event_data.get("payload", {}).get("payment", {}).get("entity", {}).get("id")
+            amount_val = Decimal(str(payload_entity.get("amount", 0))) / Decimal("100")
+
+            recorded_by = UUID(user_id_str) if user_id_str else None
+            if not recorded_by:
+                first_member = db.scalar(select(OrganizationMember).where(OrganizationMember.organization_id == org_id))
+                recorded_by = first_member.user_id if first_member else None
+
+            if recorded_by and payment_id:
+                process_fee_payment(
+                    db=db,
+                    organization_id=org_id,
+                    fee_id=fee_id,
+                    amount=amount_val,
+                    payment_method="ONLINE",
+                    transaction_reference=payment_id,
+                    recorded_by_user_id=recorded_by,
+                    notes=f"Razorpay Webhook: {event_type}",
+                )
+
+    return {"status": "ok"}
+
+
+@router.post("/payments", status_code=201)
+def record_payment(request: PaymentInput, principal: Principal = Depends(require_roles("OWNER", "ADMIN")), db: Session = Depends(get_db)):
+    if request.transaction_reference and db.scalar(select(Payment).where(Payment.organization_id == principal.organization_id, Payment.transaction_reference == request.transaction_reference)):
+        raise TuiroError("DUPLICATE_PAYMENT", "This transaction reference has already been recorded.", 409)
+    return process_fee_payment(
+        db=db,
+        organization_id=principal.organization_id,
+        fee_id=request.fee_id,
+        amount=request.amount,
+        payment_method=request.payment_method,
+        transaction_reference=request.transaction_reference,
+        recorded_by_user_id=principal.user.id,
+        payment_date=request.payment_date,
+        notes=request.notes,
+    )
 
 
 @router.get("/payments")
