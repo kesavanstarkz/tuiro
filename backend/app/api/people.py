@@ -36,13 +36,13 @@ class TeacherResponse(TeacherCreate):
     user_id: UUID | None
 
 
-def _list(kind: str, response_model, search: str | None, limit: int, offset: int, principal: Principal, db: Session):
-    return people.list_records(db, principal.organization_id, kind, search, limit, offset)
+def _list(kind: str, response_model, search: str | None, limit: int, offset: int, principal: Principal, db: Session, status: str | None = None):
+    return people.list_records(db, principal.organization_id, kind, search, limit, offset, status=status)
 
 
 @router.get("/students", response_model=list[StudentResponse])
-def list_students(search: str | None = None, limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0), principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
-    return _list("students", StudentResponse, search, limit, offset, principal, db)
+def list_students(search: str | None = None, status: str = Query("ACTIVE", description="ACTIVE, WITHDRAWN, or ALL"), limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0), principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
+    return _list("students", StudentResponse, search, limit, offset, principal, db, status=status)
 
 
 @router.post("/students", response_model=StudentResponse, status_code=status.HTTP_201_CREATED)

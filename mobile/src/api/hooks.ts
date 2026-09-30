@@ -19,7 +19,7 @@ export type { AttendanceSessionResponse, AttendanceStatus, ClassItem, Fee, Stude
 
 const invalidate = (client: ReturnType<typeof useQueryClient>, keys: string[][]) => keys.forEach((queryKey) => void client.invalidateQueries({ queryKey }));
 export function useDashboard() { return useQuery({ queryKey: ["dashboard"], queryFn: reportsApi.dashboard, refetchOnReconnect: true }); }
-export function useStudents(search?: string) { return useQuery({ queryKey: ["students", search ?? ""], queryFn: () => studentsApi.list(search), refetchOnReconnect: true }); }
+export function useStudents(search?: string, status?: string) { return useQuery({ queryKey: ["students", search ?? "", status ?? "ACTIVE"], queryFn: () => studentsApi.list(search, status), refetchOnReconnect: true }); }
 export function useStudent(id?: string) { return useQuery({ queryKey: ["student", id], queryFn: () => studentsApi.get(id!), enabled: Boolean(id) }); }
 export function useParents(search?: string) { return useQuery({ queryKey: ["parents", search ?? ""], queryFn: () => parentsApi.list(search) }); }
 export function useTeachers() { return useQuery({ queryKey: ["teachers"], queryFn: teachersApi.list }); }

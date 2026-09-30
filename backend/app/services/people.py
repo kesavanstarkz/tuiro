@@ -15,9 +15,13 @@ def _model(kind: str):
     return {"students": Student, "parents": Parent, "classes": ClassGroup, "teachers": Teacher}[kind]
 
 
-def list_records(db: Session, organization_id: UUID, kind: str, search: str | None, limit: int, offset: int) -> Sequence:
+def list_records(db: Session, organization_id: UUID, kind: str, search: str | None, limit: int, offset: int, status: str | None = None) -> Sequence:
     model = _model(kind)
     query = select(model).where(model.organization_id == organization_id).offset(offset).limit(min(limit, 100))
+    if kind == "students":
+        st = (status or "ACTIVE").upper()
+        if st != "ALL":
+            query = query.where(Student.status == st)
     if search and kind == "students":
         query = query.where(or_(Student.first_name.ilike(f"%{search}%"), Student.last_name.ilike(f"%{search}%"), Student.student_number.ilike(f"%{search}%")))
     elif search and kind == "parents":

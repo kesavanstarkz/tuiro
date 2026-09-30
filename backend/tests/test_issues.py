@@ -496,6 +496,62 @@ def test_i8_patch_accepts_partial_body(client: TestClient = None):
     assert set_patch.json()["currency_code"] == "USD"
 
 
+def test_i9_withdrawn_students_hidden_by_default(client: TestClient = None):
+    c = client or TestClient(app)
+    email = f"i9-{uuid4().hex}@example.com"
+    reg = c.post("/api/v1/auth/register", json={
+        "organization_name": "I9 Center",
+        "email": email,
+        "password": "Password123!",
+        "display_name": "I9 Owner",
+    })
+    assert reg.status_code == 201
+    headers = {"Authorization": f"Bearer {reg.json()['access_token']}"}
+
+    # Create active student
+    stu1 = c.post("/api/v1/students", json={
+        "student_number": "ACT-001",
+        "first_name": "Active",
+        "last_name": "Student",
+        "status": "ACTIVE",
+    }, headers=headers)
+    assert stu1.status_code == 201
+
+    # Create withdrawn student
+    stu2 = c.post("/api/v1/students", json={
+        "student_number": "WTH-001",
+        "first_name": "Withdrawn",
+        "last_name": "Student",
+        "status": "WITHDRAWN",
+    }, headers=headers)
+    assert stu2.status_code == 201
+
+    # Default listing (no status param) -> must only return ACTIVE students
+    res_default = c.get("/api/v1/students", headers=headers)
+    assert res_default.status_code == 200
+    names_default = [s["student_number"] for s in res_default.json()]
+    assert names_default == ["ACT-001"]
+
+    # Explicit ACTIVE status -> must only return ACTIVE students
+    res_active = c.get("/api/v1/students?status=ACTIVE", headers=headers)
+    assert res_active.status_code == 200
+    names_active = [s["student_number"] for s in res_active.json()]
+    assert names_active == ["ACT-001"]
+
+    # Explicit WITHDRAWN status -> must only return WITHDRAWN students
+    res_withdrawn = c.get("/api/v1/students?status=WITHDRAWN", headers=headers)
+    assert res_withdrawn.status_code == 200
+    names_withdrawn = [s["student_number"] for s in res_withdrawn.json()]
+    assert names_withdrawn == ["WTH-001"]
+
+    # Explicit ALL status -> must return both
+    res_all = c.get("/api/v1/students?status=ALL", headers=headers)
+    assert res_all.status_code == 200
+    names_all = [s["student_number"] for s in res_all.json()]
+    assert "ACT-001" in names_all and "WTH-001" in names_all
+
+
+
 
 
 
