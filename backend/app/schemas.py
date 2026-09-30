@@ -53,8 +53,16 @@ class StudentCreate(BaseModel):
     status: str = "ACTIVE"
 
 
-class StudentUpdate(StudentCreate):
-    pass
+class StudentUpdate(BaseModel):
+    student_number: str | None = Field(default=None, min_length=1, max_length=80)
+    first_name: str | None = Field(default=None, min_length=1, max_length=100)
+    last_name: str | None = None
+    school: str | None = None
+    grade: str | None = None
+    address: str | None = None
+    joining_date: date | None = None
+    notes: str | None = None
+    status: str | None = None
 
 
 class StudentResponse(StudentCreate):
@@ -74,6 +82,15 @@ class ParentCreate(BaseModel):
     status: str = "ACTIVE"
 
 
+class ParentUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=160)
+    phone: str | None = None
+    email: EmailStr | None = None
+    address: str | None = None
+    relationship: str | None = None
+    status: str | None = None
+
+
 class ParentResponse(ParentCreate):
     model_config = ConfigDict(from_attributes=True)
     id: UUID
@@ -88,6 +105,14 @@ class ClassCreate(BaseModel):
     description: str | None = None
     fee_amount: Decimal = Field(default=0, ge=0)
     status: str = "ACTIVE"
+
+
+class ClassUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=160)
+    subject: str | None = None
+    description: str | None = None
+    fee_amount: Decimal | None = Field(default=None, ge=0)
+    status: str | None = None
 
 
 class ClassResponse(ClassCreate):

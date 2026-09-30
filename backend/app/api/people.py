@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.core.dependencies import Principal, require_authenticated_user, require_roles
 from app.db import get_db
-from app.schemas import ClassCreate, ClassResponse, ParentCreate, ParentResponse, StudentCreate, StudentResponse
+from app.schemas import ClassCreate, ClassResponse, ClassUpdate, ParentCreate, ParentResponse, ParentUpdate, StudentCreate, StudentResponse, StudentUpdate
 from app.services import people
 
 router = APIRouter()
@@ -20,6 +20,13 @@ class TeacherCreate(BaseModel):
     specialization: str | None = None
     joining_date: date | None = None
     status: str = "ACTIVE"
+
+
+class TeacherUpdate(BaseModel):
+    employee_number: str | None = None
+    specialization: str | None = None
+    joining_date: date | None = None
+    status: str | None = None
 
 
 class TeacherResponse(TeacherCreate):
@@ -49,8 +56,8 @@ def get_student(record_id: UUID, principal: Principal = Depends(require_authenti
 
 
 @router.patch("/students/{record_id}", response_model=StudentResponse)
-def update_student(record_id: UUID, request: StudentCreate, principal: Principal = Depends(require_roles("OWNER", "ADMIN")), db: Session = Depends(get_db)):
-    return people.update_record(db, principal.organization_id, "students", record_id, request.model_dump())
+def update_student(record_id: UUID, request: StudentUpdate, principal: Principal = Depends(require_roles("OWNER", "ADMIN")), db: Session = Depends(get_db)):
+    return people.update_record(db, principal.organization_id, "students", record_id, request.model_dump(exclude_unset=True))
 
 
 @router.delete("/students/{record_id}", status_code=204)
@@ -74,8 +81,8 @@ def get_parent(record_id: UUID, principal: Principal = Depends(require_authentic
 
 
 @router.patch("/parents/{record_id}", response_model=ParentResponse)
-def update_parent(record_id: UUID, request: ParentCreate, principal: Principal = Depends(require_roles("OWNER", "ADMIN")), db: Session = Depends(get_db)):
-    return people.update_record(db, principal.organization_id, "parents", record_id, request.model_dump())
+def update_parent(record_id: UUID, request: ParentUpdate, principal: Principal = Depends(require_roles("OWNER", "ADMIN")), db: Session = Depends(get_db)):
+    return people.update_record(db, principal.organization_id, "parents", record_id, request.model_dump(exclude_unset=True))
 
 
 @router.delete("/parents/{record_id}", status_code=204)
@@ -99,8 +106,8 @@ def get_class(record_id: UUID, principal: Principal = Depends(require_authentica
 
 
 @router.patch("/classes/{record_id}", response_model=ClassResponse)
-def update_class(record_id: UUID, request: ClassCreate, principal: Principal = Depends(require_roles("OWNER", "ADMIN")), db: Session = Depends(get_db)):
-    return people.update_record(db, principal.organization_id, "classes", record_id, request.model_dump())
+def update_class(record_id: UUID, request: ClassUpdate, principal: Principal = Depends(require_roles("OWNER", "ADMIN")), db: Session = Depends(get_db)):
+    return people.update_record(db, principal.organization_id, "classes", record_id, request.model_dump(exclude_unset=True))
 
 
 @router.delete("/classes/{record_id}", status_code=204)
@@ -124,8 +131,8 @@ def get_teacher(record_id: UUID, principal: Principal = Depends(require_authenti
 
 
 @router.patch("/teachers/{record_id}", response_model=TeacherResponse)
-def update_teacher(record_id: UUID, request: TeacherCreate, principal: Principal = Depends(require_roles("OWNER", "ADMIN")), db: Session = Depends(get_db)):
-    return people.update_record(db, principal.organization_id, "teachers", record_id, request.model_dump())
+def update_teacher(record_id: UUID, request: TeacherUpdate, principal: Principal = Depends(require_roles("OWNER", "ADMIN")), db: Session = Depends(get_db)):
+    return people.update_record(db, principal.organization_id, "teachers", record_id, request.model_dump(exclude_unset=True))
 
 
 @router.delete("/teachers/{record_id}", status_code=204)

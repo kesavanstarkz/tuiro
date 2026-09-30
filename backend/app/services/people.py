@@ -73,7 +73,7 @@ def create_record(db: Session, organization_id: UUID, kind: str, values: dict):
 
 def update_record(db: Session, organization_id: UUID, kind: str, record_id: UUID, values: dict):
     record = get_record(db, organization_id, kind, record_id)
-    if kind == "students":
+    if kind == "students" and "student_number" in values and values["student_number"] is not None:
         student_number = values["student_number"].strip()
         values["student_number"] = student_number
         duplicate = db.scalar(select(Student.id).where(Student.organization_id == organization_id, Student.student_number == student_number, Student.id != record_id))

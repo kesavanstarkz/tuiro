@@ -61,12 +61,27 @@ class HomeworkInput(BaseModel):
     due_date: date | None = None
 
 
+class HomeworkUpdate(BaseModel):
+    class_id: UUID | None = None
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    description: str | None = None
+    due_date: date | None = None
+
+
 class TestInput(BaseModel):
     class_id: UUID
     name: str = Field(min_length=1, max_length=160)
     subject: str | None = None
     test_date: date
     maximum_marks: Decimal = Field(gt=0)
+
+
+class TestUpdate(BaseModel):
+    class_id: UUID | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=160)
+    subject: str | None = None
+    test_date: date | None = None
+    maximum_marks: Decimal | None = Field(default=None, gt=0)
 
 
 class MarkInput(BaseModel):
@@ -82,6 +97,15 @@ class ScheduleInput(BaseModel):
     day_of_week: int = Field(ge=0, le=6)
     start_time: str
     end_time: str
+    room: str | None = None
+
+
+class ScheduleUpdate(BaseModel):
+    class_id: UUID | None = None
+    teacher_id: UUID | None = None
+    day_of_week: int | None = Field(default=None, ge=0, le=6)
+    start_time: str | None = None
+    end_time: str | None = None
     room: str | None = None
 
 
@@ -312,10 +336,12 @@ def list_homework(principal: Principal = Depends(require_authenticated_user), db
 
 
 @router.patch("/homework/{homework_id}")
-def update_homework(homework_id: UUID, request: HomeworkInput, principal: Principal = Depends(require_roles("OWNER", "ADMIN", "TEACHER")), db: Session = Depends(get_db)):
+def update_homework(homework_id: UUID, request: HomeworkUpdate, principal: Principal = Depends(require_roles("OWNER", "ADMIN", "TEACHER")), db: Session = Depends(get_db)):
     record = _org_record(db, Homework, principal.organization_id, homework_id)
-    _org_record(db, ClassGroup, principal.organization_id, request.class_id)
-    for key, value in request.model_dump().items(): setattr(record, key, value)
+    data = request.model_dump(exclude_unset=True)
+    if "class_id" in data and data["class_id"] is not None:
+        _org_record(db, ClassGroup, principal.organization_id, data["class_id"])
+    for key, value in data.items(): setattr(record, key, value)
     db.commit(); db.refresh(record)
     return record
 
@@ -339,10 +365,12 @@ def list_tests(principal: Principal = Depends(require_authenticated_user), db: S
 
 
 @router.patch("/tests/{test_id}")
-def update_test(test_id: UUID, request: TestInput, principal: Principal = Depends(require_roles("OWNER", "ADMIN", "TEACHER")), db: Session = Depends(get_db)):
+def update_test(test_id: UUID, request: TestUpdate, principal: Principal = Depends(require_roles("OWNER", "ADMIN", "TEACHER")), db: Session = Depends(get_db)):
     record = _org_record(db, AcademicTest, principal.organization_id, test_id)
-    _org_record(db, ClassGroup, principal.organization_id, request.class_id)
-    for key, value in request.model_dump().items(): setattr(record, key, value)
+    data = request.model_dump(exclude_unset=True)
+    if "class_id" in data and data["class_id"] is not None:
+        _org_record(db, ClassGroup, principal.organization_id, data["class_id"])
+    for key, value in data.items(): setattr(record, key, value)
     db.commit(); db.refresh(record)
     return record
 
@@ -387,10 +415,12 @@ def create_schedule(request: ScheduleInput, principal: Principal = Depends(requi
 
 
 @router.patch("/schedule/{schedule_id}")
-def update_schedule(schedule_id: UUID, request: ScheduleInput, principal: Principal = Depends(require_roles("OWNER", "ADMIN")), db: Session = Depends(get_db)):
+def update_schedule(schedule_id: UUID, request: ScheduleUpdate, principal: Principal = Depends(require_roles("OWNER", "ADMIN")), db: Session = Depends(get_db)):
     record = _org_record(db, ScheduleEntry, principal.organization_id, schedule_id)
-    _org_record(db, ClassGroup, principal.organization_id, request.class_id)
-    for key, value in request.model_dump().items(): setattr(record, key, value)
+    data = request.model_dump(exclude_unset=True)
+    if "class_id" in data and data["class_id"] is not None:
+        _org_record(db, ClassGroup, principal.organization_id, data["class_id"])
+    for key, value in data.items(): setattr(record, key, value)
     db.commit(); db.refresh(record)
     return record
 
@@ -627,7 +657,7 @@ class SettingsInput(BaseModel):
 def update_settings(request: SettingsInput, principal: Principal = Depends(require_roles("OWNER", "ADMIN")), db: Session = Depends(get_db)):
     organization = db.get(Organization, principal.organization_id)
     if organization is None: raise TuiroError("ORGANIZATION_NOT_FOUND", "Organization not found.", 404)
-    for key, value in request.model_dump(exclude_none=True).items(): setattr(organization, key, value)
+    for key, value in request.model_dump(exclude_unset=True).items(): setattr(organization, key, value)
     db.commit(); db.refresh(organization); return organization
 
 

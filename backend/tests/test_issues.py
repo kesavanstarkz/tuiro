@@ -370,5 +370,133 @@ def test_i7_concurrency_and_side_effects(client: TestClient = None):
         assert after_threads == initial_threads, "GET /chats/direct must not mutate database"
 
 
+def test_i8_patch_accepts_partial_body(client: TestClient = None):
+    c = client or TestClient(app)
+    reg = c.post("/api/v1/auth/register", json={
+        "email": f"i8-{uuid4().hex}@example.com",
+        "password": "password123",
+        "display_name": "I8 Owner",
+        "organization_name": "I8 Patch Org",
+    })
+    assert reg.status_code == 201
+    headers = {"Authorization": f"Bearer {reg.json()['access_token']}"}
+
+    # 1. Student: create and partial patch
+    stu = c.post("/api/v1/students", json={
+        "student_number": "STU-888",
+        "first_name": "OriginalFirst",
+        "last_name": "OriginalLast",
+    }, headers=headers).json()
+    stu_id = stu["id"]
+
+    stu_patch = c.patch(f"/api/v1/students/{stu_id}", json={
+        "first_name": "UpdatedFirst"
+    }, headers=headers)
+    assert stu_patch.status_code == 200, stu_patch.text
+    assert stu_patch.json()["first_name"] == "UpdatedFirst"
+    assert stu_patch.json()["last_name"] == "OriginalLast"
+    assert stu_patch.json()["student_number"] == "STU-888"
+
+    # 2. Class: create and partial patch
+    cls = c.post("/api/v1/classes", json={
+        "name": "Math Grade 11",
+        "subject": "Mathematics",
+        "fee_amount": 120.0,
+    }, headers=headers).json()
+    cls_id = cls["id"]
+
+    cls_patch = c.patch(f"/api/v1/classes/{cls_id}", json={
+        "name": "Advanced Math Grade 11"
+    }, headers=headers)
+    assert cls_patch.status_code == 200, cls_patch.text
+    assert cls_patch.json()["name"] == "Advanced Math Grade 11"
+    assert cls_patch.json()["subject"] == "Mathematics"
+
+    # 3. Parent: create and partial patch
+    par = c.post("/api/v1/parents", json={
+        "name": "Bruce Wayne",
+        "phone": "+1234567890",
+    }, headers=headers).json()
+    par_id = par["id"]
+
+    par_patch = c.patch(f"/api/v1/parents/{par_id}", json={
+        "phone": "+9876543210"
+    }, headers=headers)
+    assert par_patch.status_code == 200, par_patch.text
+    assert par_patch.json()["phone"] == "+9876543210"
+    assert par_patch.json()["name"] == "Bruce Wayne"
+
+    # 4. Teacher: create and partial patch
+    tch = c.post("/api/v1/teachers", json={
+        "employee_number": "TCH-001",
+        "specialization": "Physics",
+    }, headers=headers).json()
+    tch_id = tch["id"]
+
+    tch_patch = c.patch(f"/api/v1/teachers/{tch_id}", json={
+        "specialization": "Quantum Physics"
+    }, headers=headers)
+    assert tch_patch.status_code == 200, tch_patch.text
+    assert tch_patch.json()["specialization"] == "Quantum Physics"
+    assert tch_patch.json()["employee_number"] == "TCH-001"
+
+    # 5. Homework: create and partial patch
+    hw = c.post("/api/v1/homework", json={
+        "class_id": cls_id,
+        "title": "Exercise 1.1",
+        "due_date": "2026-10-15",
+    }, headers=headers).json()
+    hw_id = hw["id"]
+
+    hw_patch = c.patch(f"/api/v1/homework/{hw_id}", json={
+        "title": "Exercise 1.1 & 1.2"
+    }, headers=headers)
+    assert hw_patch.status_code == 200, hw_patch.text
+    assert hw_patch.json()["title"] == "Exercise 1.1 & 1.2"
+    assert hw_patch.json()["due_date"] == "2026-10-15"
+
+    # 6. Test: create and partial patch
+    test_obj = c.post("/api/v1/tests", json={
+        "class_id": cls_id,
+        "name": "Midterm Exam",
+        "test_date": "2026-10-20",
+        "maximum_marks": 100.0,
+    }, headers=headers).json()
+    test_id = test_obj["id"]
+
+    test_patch = c.patch(f"/api/v1/tests/{test_id}", json={
+        "name": "Midterm Exam - Revised"
+    }, headers=headers)
+    assert test_patch.status_code == 200, test_patch.text
+    assert test_patch.json()["name"] == "Midterm Exam - Revised"
+    assert float(test_patch.json()["maximum_marks"]) == 100.0
+
+    # 7. Schedule: create and partial patch
+    sch = c.post("/api/v1/schedule", json={
+        "class_id": cls_id,
+        "day_of_week": 1,
+        "start_time": "10:00",
+        "end_time": "11:00",
+        "room": "Room A",
+    }, headers=headers).json()
+    sch_id = sch["id"]
+
+    sch_patch = c.patch(f"/api/v1/schedule/{sch_id}", json={
+        "room": "Room B"
+    }, headers=headers)
+    assert sch_patch.status_code == 200, sch_patch.text
+    assert sch_patch.json()["room"] == "Room B"
+    assert sch_patch.json()["start_time"] == "10:00"
+
+    # 8. Settings: partial patch
+    set_patch = c.patch("/api/v1/settings", json={
+        "currency_code": "USD"
+    }, headers=headers)
+    assert set_patch.status_code == 200, set_patch.text
+    assert set_patch.json()["currency_code"] == "USD"
+
+
+
+
 
 
