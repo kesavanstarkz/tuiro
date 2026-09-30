@@ -42,6 +42,10 @@ class Organization(Base):
     locale: Mapped[str] = mapped_column(String(20), default="en")
     settings: Mapped[str] = mapped_column(Text, default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    @property
+    def currency(self) -> str:
+        return self.currency_code
     memberships: Mapped[list["OrganizationMember"]] = relationship(back_populates="organization", cascade="all, delete-orphan")
 
 

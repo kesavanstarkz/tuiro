@@ -576,7 +576,7 @@ def dashboard(principal: Principal = Depends(require_roles("OWNER", "ADMIN")), d
             student_count = db.scalar(select(func.count()).select_from(ClassStudent).where(ClassStudent.organization_id == principal.organization_id, ClassStudent.class_id == entry.class_id)) or 0
             next_class = {"class_name": class_group.name if class_group else "Class", "subject": class_group.subject if class_group else None, "teacher_name": teacher.employee_number if teacher else None, "start_time": entry.start_time, "end_time": entry.end_time, "room": entry.room, "student_count": student_count}
             break
-    return {"students": students, "active_classes": classes, "classes_today": classes_today, "attendance_percentage": round((attendance_present / attendance_total) * 100, 2) if attendance_total else 0, "pending_fees": pending_total, "todays_collections": collected, "next_class": next_class, "pending_fee_items": pending_items, "recent_payments": recent_items, "currency_code": organization.currency_code if organization else "USD", "timezone": organization.timezone if organization else "Asia/Kolkata", "role": principal.role}
+    return {"students": students, "active_classes": classes, "classes_today": classes_today, "attendance_percentage": round((attendance_present / attendance_total) * 100, 2) if attendance_total else 0, "pending_fees": pending_total, "todays_collections": collected, "next_class": next_class, "pending_fee_items": pending_items, "recent_payments": recent_items, "currency_code": organization.currency_code if organization else "USD", "currency": organization.currency_code if organization else "USD", "timezone": organization.timezone if organization else "Asia/Kolkata", "role": principal.role}
 
 
 @router.post("/classes/{class_id}/students", status_code=201)
@@ -728,6 +728,7 @@ class SettingsInput(BaseModel):
     name: str | None = None
     country_code: str | None = None
     currency_code: str | None = None
+    currency: str | None = None
     timezone: str | None = None
     locale: str | None = None
 
@@ -736,7 +737,12 @@ class SettingsInput(BaseModel):
 def update_settings(request: SettingsInput, principal: Principal = Depends(require_roles("OWNER", "ADMIN")), db: Session = Depends(get_db)):
     organization = db.get(Organization, principal.organization_id)
     if organization is None: raise TuiroError("ORGANIZATION_NOT_FOUND", "Organization not found.", 404)
-    for key, value in request.model_dump(exclude_unset=True).items(): setattr(organization, key, value)
+    data = request.model_dump(exclude_unset=True)
+    if "currency" in data and "currency_code" not in data:
+        data["currency_code"] = data.pop("currency")
+    elif "currency" in data:
+        data.pop("currency")
+    for key, value in data.items(): setattr(organization, key, value)
     db.commit(); db.refresh(organization); return organization
 
 

@@ -2,14 +2,18 @@ import { useState } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
 
-import { useCreateGroupFee, useGroups, useStudents } from "@/api/hooks";
+import { useCreateGroupFee, useDashboard, useGroups, useStudents } from "@/api/hooks";
 import { Button, Card, EmptyState, ErrorState, LoadingState, PageHeader, Screen, TuiroInput } from "@/components";
 import { colors, radius, spacing, typography } from "@/theme";
+import { getCurrencySymbol } from "@/utils";
 
 export default function CollectFeeScreen() {
     const groups = useGroups();
     const students = useStudents();
     const create = useCreateGroupFee();
+    const dashboard = useDashboard();
+    const currency = dashboard.data?.currency_code || "INR";
+    const currencySymbol = getCurrencySymbol(currency);
 
     const [target, setTarget] = useState<string>("");
     const [individual, setIndividual] = useState(false);
@@ -125,7 +129,7 @@ export default function CollectFeeScreen() {
 
                 <View style={styles.inputsSection}>
                     <TuiroInput
-                        label="Amount (₹)"
+                        label={`Amount (${currencySymbol})`}
                         keyboardType="decimal-pad"
                         value={amount}
                         onChangeText={setAmount}

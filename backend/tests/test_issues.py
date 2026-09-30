@@ -975,6 +975,63 @@ def test_i13_timezone_handling_around_midnight(client: TestClient = None):
     db.close()
 
 
+def test_i14_organization_currency_settings(client: TestClient = None):
+    from uuid import uuid4
+    from app.db import SessionLocal
+    from app.models import Organization, OrganizationMember, User
+    from app.core.security import create_access_token, hash_password
+
+    c = client or TestClient(app)
+    db = SessionLocal()
+
+    org = Organization(name=f"Currency Org {uuid4().hex[:6]}", currency_code="INR")
+    db.add(org)
+    db.flush()
+
+    assert org.currency == "INR"
+
+    user = User(
+        email=f"owner-curr-{uuid4().hex}@example.com",
+        display_name="Currency Owner",
+        password_hash=hash_password("Password123!"),
+    )
+    db.add(user)
+    db.flush()
+
+    member = OrganizationMember(organization_id=org.id, user_id=user.id, role="OWNER")
+    db.add(member)
+    db.commit()
+
+    token = create_access_token(user_id=str(user.id), organization_id=str(org.id), role="OWNER")
+
+    # 1. Update currency via PATCH /settings with currency_code
+    res1 = c.patch(
+        "/api/v1/settings",
+        json={"currency_code": "USD"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert res1.status_code == 200
+    assert res1.json()["currency_code"] == "USD"
+
+    # 2. Update currency via PATCH /settings with currency alias
+    res2 = c.patch(
+        "/api/v1/settings",
+        json={"currency": "EUR"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert res2.status_code == 200
+    assert res2.json()["currency_code"] == "EUR"
+
+    # 3. GET /dashboard returns currency and currency_code
+    dash_res = c.get("/api/v1/dashboard", headers={"Authorization": f"Bearer {token}"})
+    assert dash_res.status_code == 200
+    assert dash_res.json()["currency"] == "EUR"
+    assert dash_res.json()["currency_code"] == "EUR"
+
+    db.close()
+
+
+
 
 
 

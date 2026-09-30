@@ -5,7 +5,7 @@ import { useDashboard, useGroups } from "@/api/hooks";
 import { Avatar, Badge, Card, EmptyState, ErrorState, IconButton, LoadingState, Screen, SectionHeader } from "@/components";
 import { useAuthStore } from "@/store/auth";
 import { colors, radius, spacing, typography } from "@/theme";
-import { formatOrgDate } from "@/utils/datetime";
+import { formatMoney, formatOrgDate } from "@/utils";
 
 type Dashboard = {
     students: number;
@@ -43,8 +43,7 @@ const icon = (name: keyof typeof MaterialCommunityIcons.glyphMap, color: string,
     <MaterialCommunityIcons name={name} color={color} size={size} />
 );
 
-const money = (value: string | number, currency = "INR") =>
-    new Intl.NumberFormat("en-IN", { style: "currency", currency, maximumFractionDigits: 0 }).format(Number(value) || 0);
+const money = (value: string | number, currency = "INR") => formatMoney(value, currency);
 
 export default function DashboardScreen() {
     const user = useAuthStore((state) => state.user);
@@ -179,8 +178,8 @@ export default function DashboardScreen() {
                         onPress={() => router.push("/(app)/fees/collect")}
                         accessibilityRole="button"
                     >
-                        <MaterialCommunityIcons name="currency-inr" size={18} color={colors.primary} />
-                        <Text style={styles.utilityText}>₹ Create fee</Text>
+                        <MaterialCommunityIcons name="cash-multiple" size={18} color={colors.primary} />
+                        <Text style={styles.utilityText}>Create fee</Text>
                     </Pressable>
                 </View>
 
