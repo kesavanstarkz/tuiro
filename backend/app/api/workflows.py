@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from app.core.dependencies import Principal, require_authenticated_user, require_roles
 from app.core.errors import TuiroError
 from app.db import get_db
-from app.models import AcademicTest, AttendanceRecord, AttendanceSession, AuditLog, ClassGroup, ClassStudent, ClassTeacher, GroupMember, Homework, Notification, Organization, Payment, Receipt, ScheduleEntry, Student, StudentFee, StudentParent, Parent, Teacher, TestMark
+from app.models import AcademicTest, AttendanceRecord, AttendanceSession, AuditLog, ClassGroup, ClassStudent, ClassTeacher, GroupAttendanceRecord, GroupAttendanceSession, GroupMember, Homework, Notification, Organization, Payment, Receipt, ScheduleEntry, Student, StudentFee, StudentParent, Parent, Teacher, TestMark
 from app.services.receipts import build_receipt_pdf
 
 router = APIRouter()
@@ -396,6 +396,39 @@ def delete_schedule(schedule_id: UUID, principal: Principal = Depends(require_ro
     db.delete(_org_record(db, ScheduleEntry, principal.organization_id, schedule_id)); db.commit()
 
 
+def _attendance_summary(db: Session, org_id: UUID, target_date: date | None = None) -> tuple[int, int]:
+    class_q = select(
+        AttendanceSession.session_date,
+        AttendanceSession.class_id,
+        AttendanceRecord.student_id,
+        AttendanceRecord.status,
+    ).join(AttendanceRecord, AttendanceRecord.session_id == AttendanceSession.id).where(AttendanceSession.organization_id == org_id)
+
+    group_q = select(
+        GroupAttendanceSession.session_date,
+        GroupAttendanceSession.group_id,
+        GroupAttendanceRecord.student_id,
+        GroupAttendanceRecord.status,
+    ).join(GroupAttendanceRecord, GroupAttendanceRecord.session_id == GroupAttendanceSession.id).where(GroupAttendanceSession.organization_id == org_id)
+
+    if target_date is not None:
+        class_q = class_q.where(AttendanceSession.session_date == target_date)
+        group_q = group_q.where(GroupAttendanceSession.session_date == target_date)
+
+    class_records = db.execute(class_q).all()
+    group_records = db.execute(group_q).all()
+
+    merged: dict[tuple[date, UUID, UUID], str] = {}
+    for r in class_records:
+        merged[(r.session_date, r.class_id, r.student_id)] = r.status
+    for r in group_records:
+        merged[(r.session_date, r.group_id, r.student_id)] = r.status
+
+    total = len(merged)
+    present = sum(1 for status in merged.values() if status in ("PRESENT", "LATE"))
+    return total, present
+
+
 @router.get("/dashboard")
 def dashboard(principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
     from datetime import datetime
@@ -406,8 +439,7 @@ def dashboard(principal: Principal = Depends(require_authenticated_user), db: Se
     classes = db.scalar(select(func.count()).select_from(ClassGroup).where(ClassGroup.organization_id == principal.organization_id, ClassGroup.status == "ACTIVE")) or 0
     today_schedules = db.scalars(select(ScheduleEntry).where(ScheduleEntry.organization_id == principal.organization_id, ScheduleEntry.day_of_week == today.weekday()).order_by(ScheduleEntry.start_time)).all()
     classes_today = len(today_schedules)
-    attendance_total = db.scalar(select(func.count()).select_from(AttendanceRecord).join(AttendanceSession).where(AttendanceSession.organization_id == principal.organization_id, AttendanceSession.session_date == today)) or 0
-    attendance_present = db.scalar(select(func.count()).select_from(AttendanceRecord).join(AttendanceSession).where(AttendanceSession.organization_id == principal.organization_id, AttendanceSession.session_date == today, AttendanceRecord.status.in_(["PRESENT", "LATE"]))) or 0
+    attendance_total, attendance_present = _attendance_summary(db, principal.organization_id, target_date=today)
     pending_fees = db.scalars(select(StudentFee).where(StudentFee.organization_id == principal.organization_id).order_by(StudentFee.due_date)).all()
     pending_items = []
     pending_total = Decimal("0")
@@ -433,7 +465,6 @@ def dashboard(principal: Principal = Depends(require_authenticated_user), db: Se
             student_count = db.scalar(select(func.count()).select_from(ClassStudent).where(ClassStudent.organization_id == principal.organization_id, ClassStudent.class_id == entry.class_id)) or 0
             next_class = {"class_name": class_group.name if class_group else "Class", "subject": class_group.subject if class_group else None, "teacher_name": teacher.employee_number if teacher else None, "start_time": entry.start_time, "end_time": entry.end_time, "room": entry.room, "student_count": student_count}
             break
-    db.commit()
     return {"students": students, "active_classes": classes, "classes_today": classes_today, "attendance_percentage": round((attendance_present / attendance_total) * 100, 2) if attendance_total else 0, "pending_fees": pending_total, "todays_collections": collected, "next_class": next_class, "pending_fee_items": pending_items, "recent_payments": recent_items, "currency_code": organization.currency_code if organization else "USD", "role": principal.role}
 
 
@@ -533,8 +564,7 @@ def fee_report(principal: Principal = Depends(require_roles("OWNER", "ADMIN")), 
 
 @router.get("/reports/attendance")
 def attendance_report(principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
-    total = db.scalar(select(func.count()).select_from(AttendanceRecord).join(AttendanceSession).where(AttendanceSession.organization_id == principal.organization_id)) or 0
-    present = db.scalar(select(func.count()).select_from(AttendanceRecord).join(AttendanceSession).where(AttendanceSession.organization_id == principal.organization_id, AttendanceRecord.status.in_(["PRESENT", "LATE"]))) or 0
+    total, present = _attendance_summary(db, principal.organization_id)
     return {"total_records": total, "present_records": present, "attendance_percentage": round((present / total) * 100, 2) if total else 0}
 
 
@@ -554,8 +584,31 @@ def export_fee_report(principal: Principal = Depends(require_roles("OWNER", "ADM
 
 @router.get("/reports/attendance/export.csv")
 def export_attendance_report(principal: Principal = Depends(require_roles("OWNER", "ADMIN")), db: Session = Depends(get_db)):
-    records = db.execute(select(AttendanceSession.session_date, AttendanceSession.class_id, AttendanceRecord.student_id, AttendanceRecord.status).join(AttendanceRecord, AttendanceRecord.session_id == AttendanceSession.id).where(AttendanceSession.organization_id == principal.organization_id).order_by(AttendanceSession.session_date)).all()
-    return _csv_response("tuiro-attendance.csv", ["date", "class_id", "student_id", "status"], [list(record) for record in records])
+    class_q = select(
+        AttendanceSession.session_date,
+        AttendanceSession.class_id,
+        AttendanceRecord.student_id,
+        AttendanceRecord.status,
+    ).join(AttendanceRecord, AttendanceRecord.session_id == AttendanceSession.id).where(AttendanceSession.organization_id == principal.organization_id)
+
+    group_q = select(
+        GroupAttendanceSession.session_date,
+        GroupAttendanceSession.group_id,
+        GroupAttendanceRecord.student_id,
+        GroupAttendanceRecord.status,
+    ).join(GroupAttendanceRecord, GroupAttendanceRecord.session_id == GroupAttendanceSession.id).where(GroupAttendanceSession.organization_id == principal.organization_id)
+
+    class_records = db.execute(class_q).all()
+    group_records = db.execute(group_q).all()
+
+    merged: dict[tuple[date, UUID, UUID], str] = {}
+    for r in class_records:
+        merged[(r.session_date, r.class_id, r.student_id)] = r.status
+    for r in group_records:
+        merged[(r.session_date, r.group_id, r.student_id)] = r.status
+
+    rows = [[s_date, c_id, s_id, status] for (s_date, c_id, s_id), status in sorted(merged.items(), key=lambda x: x[0][0])]
+    return _csv_response("tuiro-attendance.csv", ["date", "class_id", "student_id", "status"], rows)
 
 
 class SettingsInput(BaseModel):
