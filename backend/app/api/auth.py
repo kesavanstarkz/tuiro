@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.core.dependencies import Principal, require_authenticated_user
 from app.db import get_db
-from app.schemas import LoginRequest, RefreshRequest, RegisterRequest, TokenPair, UserResponse
+from app.schemas import LoginRequest, RefreshRequest, RegisterRequest, SwitchOrganizationRequest, TokenPair, UserResponse
 from app.services import auth
 
 router = APIRouter()
@@ -22,6 +22,15 @@ def login(request: LoginRequest, db: Session = Depends(get_db)) -> TokenPair:
 @router.post("/refresh", response_model=TokenPair)
 def refresh(request: RefreshRequest, db: Session = Depends(get_db)) -> TokenPair:
     return auth.refresh(db, request.refresh_token)
+
+
+@router.post("/switch-organization", response_model=TokenPair)
+def switch_organization(
+    request: SwitchOrganizationRequest,
+    principal: Principal = Depends(require_authenticated_user),
+    db: Session = Depends(get_db),
+) -> TokenPair:
+    return auth.switch_organization(db, principal.user.id, request)
 
 
 @router.post("/logout", status_code=204)

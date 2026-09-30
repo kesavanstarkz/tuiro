@@ -7,10 +7,17 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
+class OrganizationItem(BaseModel):
+    id: UUID
+    name: str
+    role: str
+
+
 class TokenPair(BaseModel):
-    access_token: str
-    refresh_token: str
+    access_token: str | None = None
+    refresh_token: str | None = None
     token_type: str = "bearer"
+    organizations: list[OrganizationItem] = []
 
 
 class RegisterRequest(BaseModel):
@@ -26,6 +33,12 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+    organization_id: UUID | None = None
+
+
+class SwitchOrganizationRequest(BaseModel):
+    organization_id: UUID
+    refresh_token: str | None = None
 
 
 class RefreshRequest(BaseModel):

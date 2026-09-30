@@ -7,13 +7,26 @@ from sqlalchemy.orm import Session
 from app.core.errors import TuiroError
 from app.core.security import create_access_token, create_refresh_token, hash_password, hash_refresh_token, verify_password
 from app.models import Organization, OrganizationMember, RefreshSession, Role, Subscription, SubscriptionPlan, User
-from app.schemas import LoginRequest, RegisterRequest, TokenPair
+from app.schemas import LoginRequest, OrganizationItem, RegisterRequest, SwitchOrganizationRequest, TokenPair
 
 
 def _tokens(db: Session, user: User, organization_id: UUID, role: str) -> TokenPair:
     raw_refresh, refresh_hash, expires_at = create_refresh_token()
-    db.add(RefreshSession(user_id=user.id, token_hash=refresh_hash, expires_at=expires_at))
-    return TokenPair(access_token=create_access_token(str(user.id), str(organization_id), role), refresh_token=raw_refresh)
+    db.add(RefreshSession(user_id=user.id, organization_id=organization_id, token_hash=refresh_hash, expires_at=expires_at))
+    memberships = db.scalars(
+        select(OrganizationMember).where(OrganizationMember.user_id == user.id)
+    ).all()
+    org_items = []
+    for m in memberships:
+        org = db.get(Organization, m.organization_id)
+        if org:
+            org_items.append(OrganizationItem(id=org.id, name=org.name, role=m.role))
+    return TokenPair(
+        access_token=create_access_token(str(user.id), str(organization_id), role),
+        refresh_token=raw_refresh,
+        token_type="bearer",
+        organizations=org_items,
+    )
 
 
 def register(db: Session, request: RegisterRequest) -> TokenPair:
@@ -39,9 +52,36 @@ def login(db: Session, request: LoginRequest) -> TokenPair:
     user = db.scalar(select(User).where(User.email == request.email.lower()))
     if user is None or not verify_password(request.password, user.password_hash):
         raise TuiroError("INVALID_CREDENTIALS", "Email or password is incorrect.", 401)
-    membership = db.scalar(select(OrganizationMember).where(OrganizationMember.user_id == user.id).order_by(OrganizationMember.created_at if hasattr(OrganizationMember, "created_at") else OrganizationMember.id))
-    if membership is None:
+    
+    memberships = db.scalars(
+        select(OrganizationMember).where(OrganizationMember.user_id == user.id)
+    ).all()
+    if not memberships:
         raise TuiroError("NO_ORGANIZATION", "This account is not linked to an organization.", 403)
+        
+    org_items = []
+    for m in memberships:
+        org = db.get(Organization, m.organization_id)
+        if org:
+            org_items.append(OrganizationItem(id=org.id, name=org.name, role=m.role))
+
+    if request.organization_id is not None:
+        target_mem = next((m for m in memberships if m.organization_id == request.organization_id), None)
+        if target_mem is None:
+            raise TuiroError("FORBIDDEN", "You are not a member of this organization.", 403)
+        tokens = _tokens(db, user, target_mem.organization_id, target_mem.role)
+        db.commit()
+        return tokens
+        
+    if len(memberships) > 1:
+        return TokenPair(
+            access_token=None,
+            refresh_token=None,
+            token_type="bearer",
+            organizations=org_items,
+        )
+
+    membership = memberships[0]
     tokens = _tokens(db, user, membership.organization_id, membership.role)
     db.commit()
     return tokens
@@ -55,10 +95,37 @@ def refresh(db: Session, raw_token: str) -> TokenPair:
         raise TuiroError("INVALID_REFRESH_TOKEN", "Refresh token is invalid or expired.", 401)
     session.revoked_at = now
     user = db.get(User, session.user_id)
-    membership = db.scalar(select(OrganizationMember).where(OrganizationMember.user_id == session.user_id))
-    if user is None or membership is None:
+    if user is None:
         db.commit()
         raise TuiroError("INVALID_SESSION", "Session is no longer valid.", 401)
+
+    if session.organization_id:
+        membership = db.scalar(select(OrganizationMember).where(OrganizationMember.user_id == session.user_id, OrganizationMember.organization_id == session.organization_id))
+    else:
+        membership = db.scalar(select(OrganizationMember).where(OrganizationMember.user_id == session.user_id))
+
+    if membership is None:
+        db.commit()
+        raise TuiroError("INVALID_SESSION", "Session is no longer valid.", 401)
+    tokens = _tokens(db, user, membership.organization_id, membership.role)
+    db.commit()
+    return tokens
+
+
+def switch_organization(db: Session, user_id: UUID, request: SwitchOrganizationRequest) -> TokenPair:
+    membership = db.scalar(
+        select(OrganizationMember)
+        .where(OrganizationMember.user_id == user_id, OrganizationMember.organization_id == request.organization_id)
+    )
+    if membership is None:
+        raise TuiroError("FORBIDDEN", "You are not a member of this organization.", 403)
+    user = db.get(User, user_id)
+    if user is None or not user.is_active:
+        raise TuiroError("INVALID_SESSION", "Session is no longer valid.", 401)
+    if request.refresh_token:
+        old_session = db.scalar(select(RefreshSession).where(RefreshSession.token_hash == hash_refresh_token(request.refresh_token)))
+        if old_session is not None:
+            old_session.revoked_at = datetime.now(timezone.utc)
     tokens = _tokens(db, user, membership.organization_id, membership.role)
     db.commit()
     return tokens

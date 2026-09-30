@@ -763,6 +763,80 @@ def test_i10_subscription_plans_requires_auth(client: TestClient = None):
     assert isinstance(res_auth.json(), list)
 
 
+def test_i6_multi_org_login_refresh_and_switch(client: TestClient = None):
+    from uuid import uuid4
+    from app.db import SessionLocal
+    from app.models import User, Organization, OrganizationMember
+    from app.core.security import hash_password
+
+    c = client or TestClient(app)
+    db = SessionLocal()
+
+    # User belongs to Org A and Org B
+    email = f"i6-{uuid4().hex}@example.com"
+    user = User(email=email, password_hash=hash_password("Password123!"), display_name="Multi User")
+    org_a = Organization(name="Centre Alpha", currency_code="USD")
+    org_b = Organization(name="Centre Beta", currency_code="USD")
+    org_c = Organization(name="Centre Gamma (Unrelated)", currency_code="USD")
+    db.add_all([user, org_a, org_b, org_c])
+    db.flush()
+
+    db.add(OrganizationMember(user_id=user.id, organization_id=org_a.id, role="OWNER"))
+    db.add(OrganizationMember(user_id=user.id, organization_id=org_b.id, role="TEACHER"))
+    db.commit()
+    db.close()
+
+    # 1. Login without organization_id -> returns organizations list and no tokens
+    res_no_org = c.post("/api/v1/auth/login", json={"email": email, "password": "Password123!"})
+    assert res_no_org.status_code == 200
+    data_no_org = res_no_org.json()
+    assert data_no_org["access_token"] is None
+    assert data_no_org["refresh_token"] is None
+    assert len(data_no_org["organizations"]) == 2
+    org_names = {o["name"] for o in data_no_org["organizations"]}
+    assert org_names == {"Centre Alpha", "Centre Beta"}
+
+    # 2. Login with organization_id = org_a.id -> returns tokens for org_a
+    res_a = c.post("/api/v1/auth/login", json={"email": email, "password": "Password123!", "organization_id": str(org_a.id)})
+    assert res_a.status_code == 200
+    data_a = res_a.json()
+    assert data_a["access_token"] is not None
+    assert data_a["refresh_token"] is not None
+
+    me_a = c.get("/api/v1/me", headers={"Authorization": f"Bearer {data_a['access_token']}"})
+    assert me_a.status_code == 200
+    assert me_a.json()["organization_id"] == str(org_a.id)
+    assert me_a.json()["role"] == "OWNER"
+
+    # 3. Refresh token for org_a retains org_a
+    res_ref = c.post("/api/v1/auth/refresh", json={"refresh_token": data_a["refresh_token"]})
+    assert res_ref.status_code == 200
+    data_ref = res_ref.json()
+    me_ref = c.get("/api/v1/me", headers={"Authorization": f"Bearer {data_ref['access_token']}"})
+    assert me_ref.status_code == 200
+    assert me_ref.json()["organization_id"] == str(org_a.id)
+
+    # 4. Switch to org_b
+    res_switch = c.post("/api/v1/auth/switch-organization", json={
+        "organization_id": str(org_b.id),
+        "refresh_token": data_ref["refresh_token"]
+    }, headers={"Authorization": f"Bearer {data_ref['access_token']}"})
+    assert res_switch.status_code == 200
+    data_b = res_switch.json()
+    assert data_b["access_token"] is not None
+
+    me_b = c.get("/api/v1/me", headers={"Authorization": f"Bearer {data_b['access_token']}"})
+    assert me_b.status_code == 200
+    assert me_b.json()["organization_id"] == str(org_b.id)
+    assert me_b.json()["role"] == "TEACHER"
+
+    # 5. Attempt switch to org_c (user is NOT a member) -> 403 Forbidden
+    res_bad_switch = c.post("/api/v1/auth/switch-organization", json={
+        "organization_id": str(org_c.id)
+    }, headers={"Authorization": f"Bearer {data_b['access_token']}"})
+    assert res_bad_switch.status_code == 403
+
+
 
 
 

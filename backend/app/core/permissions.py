@@ -26,6 +26,7 @@ PERMISSION_MATRIX: dict[Tuple[str, str], Set[str]] = {
     # Auth & Sessions
     ("GET", "/api/v1/me"): EVERYONE_AUTHENTICATED,
     ("POST", "/api/v1/auth/logout"): EVERYONE_AUTHENTICATED,
+    ("POST", "/api/v1/auth/switch-organization"): EVERYONE_AUTHENTICATED,
 
     # Students (Teacher gets read-only student roster; Owner/Admin manage)
     ("GET", "/api/v1/students"): STAFF,
