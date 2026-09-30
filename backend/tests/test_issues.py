@@ -551,6 +551,17 @@ def test_i9_withdrawn_students_hidden_by_default(client: TestClient = None):
     assert "ACT-001" in names_all and "WTH-001" in names_all
 
 
+def test_i11_no_migration_drift():
+    from alembic import command
+    from alembic.config import Config
+    import os
+
+    ini_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "alembic.ini")
+    config = Config(ini_path)
+    command.check(config)
+
+
+
 
 
 
