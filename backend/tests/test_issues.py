@@ -561,6 +561,183 @@ def test_i11_no_migration_drift():
     command.check(config)
 
 
+def test_i4_role_matrix_enforcement(client: TestClient = None):
+    import re
+    from uuid import uuid4
+    from app.db import SessionLocal
+    from app.models import User, Organization, OrganizationMember
+    from app.core.security import create_access_token, hash_password
+    from app.core.permissions import PERMISSION_MATRIX
+
+    c = client or TestClient(app)
+    db = SessionLocal()
+    org = Organization(name=f"I4 Org {uuid4().hex[:6]}", currency_code="USD")
+    db.add(org)
+    db.flush()
+
+    tokens = {}
+    for role in ["SUPER_ADMIN", "OWNER", "ADMIN", "TEACHER", "PARENT", "STUDENT"]:
+        u = User(
+            email=f"i4-{role.lower()}-{uuid4().hex}@example.com",
+            display_name=f"I4 {role}",
+            password_hash=hash_password("password123"),
+        )
+        db.add(u)
+        db.flush()
+        mem = OrganizationMember(organization_id=org.id, user_id=u.id, role=role)
+        db.add(mem)
+        db.flush()
+        tokens[role] = create_access_token(user_id=str(u.id), organization_id=str(org.id), role=role)
+    db.commit()
+    db.close()
+
+    dummy_id = str(uuid4())
+    failures = []
+
+    for (method, path_template), allowed_roles in PERMISSION_MATRIX.items():
+        url = re.sub(r"\{[^}]+\}", dummy_id, path_template)
+        params = {}
+        if "attendance" in path_template:
+            params["session_date"] = "2026-09-30"
+
+        for role, token in tokens.items():
+            headers = {"Authorization": f"Bearer {token}"}
+            res = c.request(method, url, headers=headers, json={}, params=params)
+            is_allowed = role in allowed_roles
+            if not is_allowed and res.status_code != 403:
+                failures.append(f"{method} {path_template} as {role}: expected 403, got {res.status_code}")
+            elif is_allowed and res.status_code == 403:
+                failures.append(f"{method} {path_template} as {role}: unexpected 403 ({res.text})")
+
+    assert not failures, "Role matrix enforcement failed:\n" + "\n".join(failures[:20])
+
+
+def test_i4_scoped_access_and_cross_tenant_isolation(client: TestClient = None):
+    from uuid import uuid4
+    from app.db import SessionLocal
+    from app.models import (
+        User, Organization, OrganizationMember, ClassGroup, Teacher, ClassTeacher,
+        Student, Parent, StudentParent
+    )
+    from app.core.security import create_access_token, hash_password
+
+    c = client or TestClient(app)
+    db = SessionLocal()
+
+    # Org 1
+    org1 = Organization(name=f"Org1 {uuid4().hex[:6]}", currency_code="USD")
+    db.add(org1)
+    db.flush()
+
+    # Teacher user in Org 1
+    teacher_user = User(email=f"teach-{uuid4().hex}@example.com", display_name="Teacher 1", password_hash=hash_password("pw"))
+    db.add(teacher_user)
+    db.flush()
+    db.add(OrganizationMember(organization_id=org1.id, user_id=teacher_user.id, role="TEACHER"))
+    teacher_record = Teacher(organization_id=org1.id, user_id=teacher_user.id, employee_number="T-001")
+    db.add(teacher_record)
+
+    # Class 1 and Class 2 in Org 1
+    cls1 = ClassGroup(organization_id=org1.id, name="Class Assigned", status="ACTIVE")
+    cls2 = ClassGroup(organization_id=org1.id, name="Class Unassigned", status="ACTIVE")
+    db.add_all([cls1, cls2])
+    db.flush()
+
+    # Assign teacher to Class 1 only
+    db.add(ClassTeacher(organization_id=org1.id, class_id=cls1.id, teacher_id=teacher_record.id))
+
+    # Student 1 and Parent 1 (linked) & Student 2 (unlinked)
+    s1_user = User(email=f"s1-{uuid4().hex}@example.com", display_name="Student 1", password_hash=hash_password("pw"))
+    p1_user = User(email=f"p1-{uuid4().hex}@example.com", display_name="Parent 1", password_hash=hash_password("pw"))
+    s2_user = User(email=f"s2-{uuid4().hex}@example.com", display_name="Student 2", password_hash=hash_password("pw"))
+    db.add_all([s1_user, p1_user, s2_user])
+    db.flush()
+
+    db.add(OrganizationMember(organization_id=org1.id, user_id=s1_user.id, role="STUDENT"))
+    db.add(OrganizationMember(organization_id=org1.id, user_id=p1_user.id, role="PARENT"))
+    db.add(OrganizationMember(organization_id=org1.id, user_id=s2_user.id, role="STUDENT"))
+
+    s1 = Student(organization_id=org1.id, user_id=s1_user.id, student_number=f"S1-{uuid4().hex[:4]}", first_name="Alice", last_name="Student", status="ACTIVE")
+    s2 = Student(organization_id=org1.id, user_id=s2_user.id, student_number=f"S2-{uuid4().hex[:4]}", first_name="Bob", last_name="Student", status="ACTIVE")
+    p1 = Parent(organization_id=org1.id, user_id=p1_user.id, name="Carol Parent")
+    db.add_all([s1, s2, p1])
+    db.flush()
+
+    db.add(StudentParent(organization_id=org1.id, student_id=s1.id, parent_id=p1.id, is_primary=True))
+
+    # Org 2 (for cross-tenant tests)
+    org2 = Organization(name=f"Org2 {uuid4().hex[:6]}", currency_code="USD")
+    db.add(org2)
+    db.flush()
+    org2_user = User(email=f"org2-{uuid4().hex}@example.com", display_name="Org2 Owner", password_hash=hash_password("pw"))
+    db.add(org2_user)
+    db.flush()
+    db.add(OrganizationMember(organization_id=org2.id, user_id=org2_user.id, role="OWNER"))
+
+    db.commit()
+
+    teacher_token = create_access_token(user_id=str(teacher_user.id), organization_id=str(org1.id), role="TEACHER")
+    parent_token = create_access_token(user_id=str(p1_user.id), organization_id=str(org1.id), role="PARENT")
+    student1_token = create_access_token(user_id=str(s1_user.id), organization_id=str(org1.id), role="STUDENT")
+    org2_token = create_access_token(user_id=str(org2_user.id), organization_id=str(org2.id), role="OWNER")
+
+    t_headers = {"Authorization": f"Bearer {teacher_token}"}
+    p_headers = {"Authorization": f"Bearer {parent_token}"}
+    s_headers = {"Authorization": f"Bearer {student1_token}"}
+    org2_headers = {"Authorization": f"Bearer {org2_token}"}
+
+    # 1. Scoped Teacher Access
+    # Teacher can record attendance for assigned Class 1
+    res_t_assigned = c.post("/api/v1/attendance/sessions", json={
+        "class_id": str(cls1.id),
+        "session_date": "2026-09-30",
+        "records": []
+    }, headers=t_headers)
+    assert res_t_assigned.status_code == 201
+
+    # Teacher CANNOT record attendance for unassigned Class 2 -> 403
+    res_t_unassigned = c.post("/api/v1/attendance/sessions", json={
+        "class_id": str(cls2.id),
+        "session_date": "2026-09-30",
+        "records": []
+    }, headers=t_headers)
+    assert res_t_unassigned.status_code == 403
+
+    # Teacher CANNOT access fees -> 403
+    res_t_fee = c.post("/api/v1/fees", json={
+        "student_id": str(s1.id),
+        "billing_period": "2026-09",
+        "amount": 100.0,
+        "due_date": "2026-10-05"
+    }, headers=t_headers)
+    assert res_t_fee.status_code == 403
+
+    # 2. Scoped Parent Access
+    # Parent can view linked child s1
+    res_p_linked = c.get(f"/api/v1/students/{s1.id}", headers=p_headers)
+    assert res_p_linked.status_code == 200
+
+    # Parent CANNOT view unlinked child s2 -> 404
+    res_p_unlinked = c.get(f"/api/v1/students/{s2.id}", headers=p_headers)
+    assert res_p_unlinked.status_code == 404
+
+    # 3. Scoped Student Access
+    # Student can view self
+    res_s_self = c.get(f"/api/v1/students/{s1.id}", headers=s_headers)
+    assert res_s_self.status_code == 200
+
+    # Student CANNOT view another student s2 -> 404
+    res_s_other = c.get(f"/api/v1/students/{s2.id}", headers=s_headers)
+    assert res_s_other.status_code == 404
+
+    # 4. Cross-tenant Isolation
+    # Org 2 owner cannot view Org 1 student -> 404
+    res_cross = c.get(f"/api/v1/students/{s1.id}", headers=org2_headers)
+    assert res_cross.status_code == 404
+
+    db.close()
+
+
 
 
 

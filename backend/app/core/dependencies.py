@@ -47,3 +47,9 @@ def require_roles(*roles: str):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
         return principal
     return dependency
+
+
+def require_permission(method: str, path: str):
+    from app.core.permissions import roles_for
+    return require_roles(*roles_for(method, path))
+

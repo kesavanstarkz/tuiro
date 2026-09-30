@@ -15,6 +15,13 @@ from sqlalchemy.orm import Session
 
 from app.core.dependencies import Principal, require_authenticated_user, require_roles
 from app.core.errors import TuiroError
+from app.core.permissions import (
+    check_parent_student_access,
+    check_student_self_access,
+    check_teacher_class_access,
+    get_parent_student_ids,
+    get_student_self_id,
+)
 from app.db import get_db
 from app.models import AcademicTest, AttendanceRecord, AttendanceSession, AuditLog, ClassGroup, ClassStudent, ClassTeacher, GroupAttendanceRecord, GroupAttendanceSession, GroupMember, Homework, Notification, Organization, Payment, Receipt, ScheduleEntry, Student, StudentFee, StudentParent, Parent, Teacher, TestMark
 from app.services.receipts import build_receipt_pdf, generate_receipt_number
@@ -154,6 +161,7 @@ def _payment_payload(db: Session, payment: Payment) -> dict:
 @router.post("/attendance/sessions", status_code=201)
 def create_attendance(request: AttendanceSessionInput, principal: Principal = Depends(require_roles("OWNER", "ADMIN", "TEACHER")), db: Session = Depends(get_db)):
     _org_record(db, ClassGroup, principal.organization_id, request.class_id)
+    check_teacher_class_access(db, principal, request.class_id)
     existing = db.scalar(select(AttendanceSession).where(AttendanceSession.organization_id == principal.organization_id, AttendanceSession.class_id == request.class_id, AttendanceSession.session_date == request.session_date))
     session = existing or AttendanceSession(organization_id=principal.organization_id, class_id=request.class_id, session_date=request.session_date, teacher_id=request.teacher_id, created_by=principal.user.id)
     if existing is None:
@@ -170,7 +178,7 @@ def create_attendance(request: AttendanceSessionInput, principal: Principal = De
 
 
 @router.get("/attendance/sessions")
-def list_attendance(session_date: date | None = None, principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
+def list_attendance(session_date: date | None = None, principal: Principal = Depends(require_roles("OWNER", "ADMIN", "TEACHER")), db: Session = Depends(get_db)):
     query = select(AttendanceSession).where(AttendanceSession.organization_id == principal.organization_id).order_by(AttendanceSession.session_date.desc())
     if session_date:
         query = query.where(AttendanceSession.session_date == session_date)
@@ -178,7 +186,9 @@ def list_attendance(session_date: date | None = None, principal: Principal = Dep
 
 
 @router.get("/attendance/session")
-def attendance_session(class_id: UUID, session_date: date, principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
+def attendance_session(class_id: UUID, session_date: date, principal: Principal = Depends(require_roles("OWNER", "ADMIN", "TEACHER")), db: Session = Depends(get_db)):
+    _org_record(db, ClassGroup, principal.organization_id, class_id)
+    check_teacher_class_access(db, principal, class_id)
     session = db.scalar(select(AttendanceSession).where(AttendanceSession.organization_id == principal.organization_id, AttendanceSession.class_id == class_id, AttendanceSession.session_date == session_date))
     if session is None:
         return {"session": None, "records": []}
@@ -187,8 +197,10 @@ def attendance_session(class_id: UUID, session_date: date, principal: Principal 
 
 
 @router.get("/attendance/student/{student_id}")
-def student_attendance(student_id: UUID, principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
+def student_attendance(student_id: UUID, principal: Principal = Depends(require_roles("OWNER", "ADMIN", "TEACHER", "PARENT", "STUDENT")), db: Session = Depends(get_db)):
     _org_record(db, Student, principal.organization_id, student_id)
+    check_parent_student_access(db, principal, student_id)
+    check_student_self_access(db, principal, student_id)
     return db.scalars(select(AttendanceRecord).join(AttendanceSession, AttendanceRecord.session_id == AttendanceSession.id).where(AttendanceSession.organization_id == principal.organization_id, AttendanceRecord.student_id == student_id)).all()
 
 
@@ -219,8 +231,14 @@ def create_fee(request: FeeCreateInput, principal: Principal = Depends(require_r
 
 
 @router.get("/fees")
-def list_fees(status_filter: str | None = Query(None, alias="status"), principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
+def list_fees(status_filter: str | None = Query(None, alias="status"), principal: Principal = Depends(require_roles("OWNER", "ADMIN", "PARENT", "STUDENT")), db: Session = Depends(get_db)):
     query = select(StudentFee).where(StudentFee.organization_id == principal.organization_id).order_by(StudentFee.due_date)
+    if principal.role == "PARENT":
+        student_ids = get_parent_student_ids(db, principal)
+        query = query.where(StudentFee.student_id.in_(student_ids))
+    elif principal.role == "STUDENT":
+        student_id = get_student_self_id(db, principal)
+        query = query.where(StudentFee.student_id == student_id)
     if status_filter:
         query = query.where(StudentFee.status == status_filter)
     fees = db.scalars(query.limit(200)).all()
@@ -229,8 +247,15 @@ def list_fees(status_filter: str | None = Query(None, alias="status"), principal
 
 
 @router.get("/fees/pending")
-def pending_fees(principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
-    fees = db.scalars(select(StudentFee).where(StudentFee.organization_id == principal.organization_id).order_by(StudentFee.due_date)).all()
+def pending_fees(principal: Principal = Depends(require_roles("OWNER", "ADMIN", "PARENT", "STUDENT")), db: Session = Depends(get_db)):
+    query = select(StudentFee).where(StudentFee.organization_id == principal.organization_id).order_by(StudentFee.due_date)
+    if principal.role == "PARENT":
+        student_ids = get_parent_student_ids(db, principal)
+        query = query.where(StudentFee.student_id.in_(student_ids))
+    elif principal.role == "STUDENT":
+        student_id = get_student_self_id(db, principal)
+        query = query.where(StudentFee.student_id == student_id)
+    fees = db.scalars(query).all()
     payload = [_fee_payload(db, fee) for fee in fees]
     return [item for item in payload if item["status"] in {"PENDING", "PARTIAL", "OVERDUE"}]
 
@@ -264,24 +289,56 @@ def record_payment(request: PaymentInput, principal: Principal = Depends(require
 
 
 @router.get("/payments")
-def list_payments(principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
-    return [_payment_payload(db, payment) for payment in db.scalars(select(Payment).where(Payment.organization_id == principal.organization_id).order_by(Payment.payment_date.desc()).limit(200)).all()]
+def list_payments(principal: Principal = Depends(require_roles("OWNER", "ADMIN", "PARENT", "STUDENT")), db: Session = Depends(get_db)):
+    query = select(Payment).where(Payment.organization_id == principal.organization_id).order_by(Payment.payment_date.desc()).limit(200)
+    if principal.role == "PARENT":
+        student_ids = get_parent_student_ids(db, principal)
+        query = query.where(Payment.student_id.in_(student_ids))
+    elif principal.role == "STUDENT":
+        student_id = get_student_self_id(db, principal)
+        query = query.where(Payment.student_id == student_id)
+    return [_payment_payload(db, payment) for payment in db.scalars(query).all()]
 
 
 @router.get("/receipts")
-def list_receipts(principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
-    return db.scalars(select(Receipt).where(Receipt.organization_id == principal.organization_id).order_by(Receipt.issued_at.desc()).limit(200)).all()
+def list_receipts(principal: Principal = Depends(require_roles("OWNER", "ADMIN", "PARENT", "STUDENT")), db: Session = Depends(get_db)):
+    query = select(Receipt).join(Payment, Payment.id == Receipt.payment_id).where(Receipt.organization_id == principal.organization_id).order_by(Receipt.issued_at.desc()).limit(200)
+    if principal.role == "PARENT":
+        student_ids = get_parent_student_ids(db, principal)
+        query = query.where(Payment.student_id.in_(student_ids))
+    elif principal.role == "STUDENT":
+        student_id = get_student_self_id(db, principal)
+        query = query.where(Payment.student_id == student_id)
+    return db.scalars(query).all()
 
 
 @router.get("/receipts/{receipt_id}")
-def get_receipt(receipt_id: UUID, principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
-    return _org_record(db, Receipt, principal.organization_id, receipt_id)
+def get_receipt(receipt_id: UUID, principal: Principal = Depends(require_roles("OWNER", "ADMIN", "PARENT", "STUDENT")), db: Session = Depends(get_db)):
+    receipt = _org_record(db, Receipt, principal.organization_id, receipt_id)
+    payment = db.get(Payment, receipt.payment_id)
+    if principal.role == "PARENT":
+        student_ids = get_parent_student_ids(db, principal)
+        if not payment or payment.student_id not in student_ids:
+            raise TuiroError("RESOURCE_NOT_FOUND", "The requested resource was not found.", 404)
+    elif principal.role == "STUDENT":
+        student_id = get_student_self_id(db, principal)
+        if not payment or payment.student_id != student_id:
+            raise TuiroError("RESOURCE_NOT_FOUND", "The requested resource was not found.", 404)
+    return receipt
 
 
 @router.get("/receipts/{receipt_id}/pdf")
-def receipt_pdf(receipt_id: UUID, principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
+def receipt_pdf(receipt_id: UUID, principal: Principal = Depends(require_roles("OWNER", "ADMIN", "PARENT", "STUDENT")), db: Session = Depends(get_db)):
     receipt = _org_record(db, Receipt, principal.organization_id, receipt_id)
     payment = db.get(Payment, receipt.payment_id)
+    if principal.role == "PARENT":
+        student_ids = get_parent_student_ids(db, principal)
+        if not payment or payment.student_id not in student_ids:
+            raise TuiroError("RESOURCE_NOT_FOUND", "The requested resource was not found.", 404)
+    elif principal.role == "STUDENT":
+        student_id = get_student_self_id(db, principal)
+        if not payment or payment.student_id != student_id:
+            raise TuiroError("RESOURCE_NOT_FOUND", "The requested resource was not found.", 404)
     fee = db.get(StudentFee, payment.fee_id) if payment else None
     student = db.get(Student, payment.student_id) if payment else None
     organization = db.get(Organization, principal.organization_id)
@@ -292,13 +349,13 @@ def receipt_pdf(receipt_id: UUID, principal: Principal = Depends(require_authent
 
 
 @router.post("/receipts/{receipt_id}/send")
-def send_receipt(receipt_id: UUID, principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
+def send_receipt(receipt_id: UUID, principal: Principal = Depends(require_roles("OWNER", "ADMIN")), db: Session = Depends(get_db)):
     receipt = _org_record(db, Receipt, principal.organization_id, receipt_id)
     return {"receipt_id": receipt.id, "channel": "share", "status": "available", "pdf_url": f"/api/v1/receipts/{receipt.id}/pdf"}
 
 
 @router.post("/notifications/fee-reminder/{fee_id}")
-def fee_reminder(fee_id: UUID, principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
+def fee_reminder(fee_id: UUID, principal: Principal = Depends(require_roles("OWNER", "ADMIN")), db: Session = Depends(get_db)):
     fee = _org_record(db, StudentFee, principal.organization_id, fee_id)
     message = f"Your tuition fee for {fee.billing_period} is due. Amount: {fee.amount_due}."
     notification = Notification(organization_id=principal.organization_id, recipient="parent contact required", channel="WHATSAPP", message=message, notification_type="FEE_REMINDER", status="PENDING")
@@ -307,7 +364,7 @@ def fee_reminder(fee_id: UUID, principal: Principal = Depends(require_authentica
 
 
 @router.get("/notifications")
-def notification_history(principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
+def notification_history(principal: Principal = Depends(require_roles("OWNER", "ADMIN", "TEACHER", "PARENT", "STUDENT")), db: Session = Depends(get_db)):
     return db.scalars(select(Notification).where(Notification.organization_id == principal.organization_id).order_by(Notification.created_at.desc()).limit(200)).all()
 
 
@@ -325,22 +382,25 @@ def create_notification(request: NotificationInput, principal: Principal = Depen
 @router.post("/homework", status_code=201)
 def create_homework(request: HomeworkInput, principal: Principal = Depends(require_roles("OWNER", "ADMIN", "TEACHER")), db: Session = Depends(get_db)):
     _org_record(db, ClassGroup, principal.organization_id, request.class_id)
+    check_teacher_class_access(db, principal, request.class_id)
     record = Homework(organization_id=principal.organization_id, created_by=principal.user.id, **request.model_dump())
     db.add(record); db.commit(); db.refresh(record)
     return record
 
 
 @router.get("/homework")
-def list_homework(principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
+def list_homework(principal: Principal = Depends(require_roles("OWNER", "ADMIN", "TEACHER", "PARENT", "STUDENT")), db: Session = Depends(get_db)):
     return db.scalars(select(Homework).where(Homework.organization_id == principal.organization_id).order_by(Homework.due_date)).all()
 
 
 @router.patch("/homework/{homework_id}")
 def update_homework(homework_id: UUID, request: HomeworkUpdate, principal: Principal = Depends(require_roles("OWNER", "ADMIN", "TEACHER")), db: Session = Depends(get_db)):
     record = _org_record(db, Homework, principal.organization_id, homework_id)
+    check_teacher_class_access(db, principal, record.class_id)
     data = request.model_dump(exclude_unset=True)
     if "class_id" in data and data["class_id"] is not None:
         _org_record(db, ClassGroup, principal.organization_id, data["class_id"])
+        check_teacher_class_access(db, principal, data["class_id"])
     for key, value in data.items(): setattr(record, key, value)
     db.commit(); db.refresh(record)
     return record
@@ -348,28 +408,33 @@ def update_homework(homework_id: UUID, request: HomeworkUpdate, principal: Princ
 
 @router.delete("/homework/{homework_id}", status_code=204)
 def delete_homework(homework_id: UUID, principal: Principal = Depends(require_roles("OWNER", "ADMIN", "TEACHER")), db: Session = Depends(get_db)):
-    db.delete(_org_record(db, Homework, principal.organization_id, homework_id)); db.commit()
+    record = _org_record(db, Homework, principal.organization_id, homework_id)
+    check_teacher_class_access(db, principal, record.class_id)
+    db.delete(record); db.commit()
 
 
 @router.post("/tests", status_code=201)
 def create_test(request: TestInput, principal: Principal = Depends(require_roles("OWNER", "ADMIN", "TEACHER")), db: Session = Depends(get_db)):
     _org_record(db, ClassGroup, principal.organization_id, request.class_id)
+    check_teacher_class_access(db, principal, request.class_id)
     record = AcademicTest(organization_id=principal.organization_id, **request.model_dump())
     db.add(record); db.commit(); db.refresh(record)
     return record
 
 
 @router.get("/tests")
-def list_tests(principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
+def list_tests(principal: Principal = Depends(require_roles("OWNER", "ADMIN", "TEACHER", "PARENT", "STUDENT")), db: Session = Depends(get_db)):
     return db.scalars(select(AcademicTest).where(AcademicTest.organization_id == principal.organization_id).order_by(AcademicTest.test_date.desc())).all()
 
 
 @router.patch("/tests/{test_id}")
 def update_test(test_id: UUID, request: TestUpdate, principal: Principal = Depends(require_roles("OWNER", "ADMIN", "TEACHER")), db: Session = Depends(get_db)):
     record = _org_record(db, AcademicTest, principal.organization_id, test_id)
+    check_teacher_class_access(db, principal, record.class_id)
     data = request.model_dump(exclude_unset=True)
     if "class_id" in data and data["class_id"] is not None:
         _org_record(db, ClassGroup, principal.organization_id, data["class_id"])
+        check_teacher_class_access(db, principal, data["class_id"])
     for key, value in data.items(): setattr(record, key, value)
     db.commit(); db.refresh(record)
     return record
@@ -377,12 +442,15 @@ def update_test(test_id: UUID, request: TestUpdate, principal: Principal = Depen
 
 @router.delete("/tests/{test_id}", status_code=204)
 def delete_test(test_id: UUID, principal: Principal = Depends(require_roles("OWNER", "ADMIN", "TEACHER")), db: Session = Depends(get_db)):
-    db.delete(_org_record(db, AcademicTest, principal.organization_id, test_id)); db.commit()
+    record = _org_record(db, AcademicTest, principal.organization_id, test_id)
+    check_teacher_class_access(db, principal, record.class_id)
+    db.delete(record); db.commit()
 
 
 @router.post("/tests/{test_id}/marks", status_code=201)
 def record_mark(test_id: UUID, request: MarkInput, principal: Principal = Depends(require_roles("OWNER", "ADMIN", "TEACHER")), db: Session = Depends(get_db)):
     test = _org_record(db, AcademicTest, principal.organization_id, test_id)
+    check_teacher_class_access(db, principal, test.class_id)
     _org_record(db, Student, principal.organization_id, request.student_id)
     if request.marks > test.maximum_marks:
         raise TuiroError("MARKS_EXCEED_MAXIMUM", "Marks cannot exceed the maximum.", 400)
@@ -396,14 +464,21 @@ def record_mark(test_id: UUID, request: MarkInput, principal: Principal = Depend
 
 
 @router.get("/tests/{test_id}/marks")
-def list_marks(test_id: UUID, principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
+def list_marks(test_id: UUID, principal: Principal = Depends(require_roles("OWNER", "ADMIN", "TEACHER", "PARENT", "STUDENT")), db: Session = Depends(get_db)):
     test = _org_record(db, AcademicTest, principal.organization_id, test_id)
-    marks = db.scalars(select(TestMark).where(TestMark.organization_id == principal.organization_id, TestMark.test_id == test.id)).all()
+    query = select(TestMark).where(TestMark.organization_id == principal.organization_id, TestMark.test_id == test.id)
+    if principal.role == "PARENT":
+        student_ids = get_parent_student_ids(db, principal)
+        query = query.where(TestMark.student_id.in_(student_ids))
+    elif principal.role == "STUDENT":
+        student_id = get_student_self_id(db, principal)
+        query = query.where(TestMark.student_id == student_id)
+    marks = db.scalars(query).all()
     return [{"id": mark.id, "student_id": mark.student_id, "student_name": _student_name(db, mark.student_id), "marks": mark.marks, "maximum_marks": test.maximum_marks, "percentage": round(float(mark.marks / test.maximum_marks * 100), 2), "grade": mark.grade, "remarks": mark.remarks} for mark in marks]
 
 
 @router.get("/schedule")
-def list_schedule(principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
+def list_schedule(principal: Principal = Depends(require_roles("OWNER", "ADMIN", "TEACHER", "PARENT", "STUDENT")), db: Session = Depends(get_db)):
     return db.scalars(select(ScheduleEntry).where(ScheduleEntry.organization_id == principal.organization_id).order_by(ScheduleEntry.day_of_week, ScheduleEntry.start_time)).all()
 
 
@@ -464,7 +539,7 @@ def _attendance_summary(db: Session, org_id: UUID, target_date: date | None = No
 
 
 @router.get("/dashboard")
-def dashboard(principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
+def dashboard(principal: Principal = Depends(require_roles("OWNER", "ADMIN")), db: Session = Depends(get_db)):
     from datetime import datetime
 
     organization = db.get(Organization, principal.organization_id)
@@ -519,7 +594,7 @@ def assign_student(class_id: UUID, request: AssignmentInput, principal: Principa
 
 
 @router.get("/classes/{class_id}/students")
-def class_students(class_id: UUID, principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
+def class_students(class_id: UUID, principal: Principal = Depends(require_roles("OWNER", "ADMIN", "TEACHER")), db: Session = Depends(get_db)):
     _org_record(db, ClassGroup, principal.organization_id, class_id)
     return db.scalars(select(Student).join(ClassStudent, ClassStudent.student_id == Student.id).where(ClassStudent.organization_id == principal.organization_id, ClassStudent.class_id == class_id, Student.organization_id == principal.organization_id, Student.status == "ACTIVE")).all()
 
@@ -546,7 +621,7 @@ def assign_teacher(class_id: UUID, request: AssignmentInput, principal: Principa
 
 
 @router.get("/classes/{class_id}/teachers")
-def class_teachers(class_id: UUID, principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
+def class_teachers(class_id: UUID, principal: Principal = Depends(require_roles("OWNER", "ADMIN", "TEACHER")), db: Session = Depends(get_db)):
     _org_record(db, ClassGroup, principal.organization_id, class_id)
     return db.scalars(select(Teacher).join(ClassTeacher, ClassTeacher.teacher_id == Teacher.id).where(ClassTeacher.organization_id == principal.organization_id, ClassTeacher.class_id == class_id, Teacher.organization_id == principal.organization_id)).all()
 
@@ -571,14 +646,16 @@ def link_parent(student_id: UUID, request: ParentLinkInput, principal: Principal
 
 
 @router.get("/students/{student_id}/parents")
-def student_parents(student_id: UUID, principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
+def student_parents(student_id: UUID, principal: Principal = Depends(require_roles("OWNER", "ADMIN", "TEACHER", "PARENT", "STUDENT")), db: Session = Depends(get_db)):
     _org_record(db, Student, principal.organization_id, student_id)
     return db.scalars(select(Parent).join(StudentParent, StudentParent.parent_id == Parent.id).where(StudentParent.organization_id == principal.organization_id, StudentParent.student_id == student_id, Parent.organization_id == principal.organization_id)).all()
 
 
 @router.get("/parents/{parent_id}/students")
-def parent_students(parent_id: UUID, principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
-    _org_record(db, Parent, principal.organization_id, parent_id)
+def parent_students(parent_id: UUID, principal: Principal = Depends(require_roles("OWNER", "ADMIN", "PARENT")), db: Session = Depends(get_db)):
+    parent = _org_record(db, Parent, principal.organization_id, parent_id)
+    if principal.role == "PARENT" and parent.user_id != principal.user.id:
+        raise TuiroError("RESOURCE_NOT_FOUND", "The requested resource was not found.", 404)
     return db.scalars(select(Student).join(StudentParent, StudentParent.student_id == Student.id).where(StudentParent.organization_id == principal.organization_id, StudentParent.parent_id == parent_id, Student.organization_id == principal.organization_id)).all()
 
 
@@ -597,7 +674,7 @@ def fee_report(principal: Principal = Depends(require_roles("OWNER", "ADMIN")), 
 
 
 @router.get("/reports/attendance")
-def attendance_report(principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
+def attendance_report(principal: Principal = Depends(require_roles("OWNER", "ADMIN")), db: Session = Depends(get_db)):
     total, present = _attendance_summary(db, principal.organization_id)
     return {"total_records": total, "present_records": present, "attendance_percentage": round((present / total) * 100, 2) if total else 0}
 
@@ -662,13 +739,13 @@ def update_settings(request: SettingsInput, principal: Principal = Depends(requi
 
 
 @router.get("/settings")
-def get_settings(principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
+def get_settings(principal: Principal = Depends(require_roles("OWNER", "ADMIN")), db: Session = Depends(get_db)):
     organization = db.get(Organization, principal.organization_id)
     return organization
 
 
 @router.get("/subscription")
-def subscription_status(principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
+def subscription_status(principal: Principal = Depends(require_roles("OWNER", "ADMIN")), db: Session = Depends(get_db)):
     from app.models import Subscription, SubscriptionPlan
     subscription = db.scalar(select(Subscription).where(Subscription.organization_id == principal.organization_id))
     if subscription is None:
@@ -679,6 +756,6 @@ def subscription_status(principal: Principal = Depends(require_authenticated_use
 
 
 @router.get("/subscription/plans")
-def subscription_plans(db: Session = Depends(get_db)):
+def subscription_plans(principal: Principal = Depends(require_roles("OWNER", "ADMIN")), db: Session = Depends(get_db)):
     from app.models import SubscriptionPlan
     return db.scalars(select(SubscriptionPlan).where(SubscriptionPlan.is_active.is_(True))).all()

@@ -3,11 +3,12 @@ from __future__ import annotations
 from datetime import date
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
-from app.core.dependencies import Principal, require_authenticated_user, require_roles
+from app.core.dependencies import Principal, require_roles
+from app.core.permissions import check_parent_student_access, check_student_self_access
 from app.db import get_db
 from app.schemas import ClassCreate, ClassResponse, ClassUpdate, ParentCreate, ParentResponse, ParentUpdate, StudentCreate, StudentResponse, StudentUpdate
 from app.services import people
@@ -41,7 +42,7 @@ def _list(kind: str, response_model, search: str | None, limit: int, offset: int
 
 
 @router.get("/students", response_model=list[StudentResponse])
-def list_students(search: str | None = None, status: str = Query("ACTIVE", description="ACTIVE, WITHDRAWN, or ALL"), limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0), principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
+def list_students(search: str | None = None, status: str = Query("ACTIVE", description="ACTIVE, WITHDRAWN, or ALL"), limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0), principal: Principal = Depends(require_roles("OWNER", "ADMIN", "TEACHER")), db: Session = Depends(get_db)):
     return _list("students", StudentResponse, search, limit, offset, principal, db, status=status)
 
 
@@ -51,7 +52,9 @@ def create_student(request: StudentCreate, principal: Principal = Depends(requir
 
 
 @router.get("/students/{record_id}", response_model=StudentResponse)
-def get_student(record_id: UUID, principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
+def get_student(record_id: UUID, principal: Principal = Depends(require_roles("OWNER", "ADMIN", "TEACHER", "PARENT", "STUDENT")), db: Session = Depends(get_db)):
+    check_parent_student_access(db, principal, record_id)
+    check_student_self_access(db, principal, record_id)
     return people.get_record(db, principal.organization_id, "students", record_id)
 
 
@@ -66,7 +69,7 @@ def delete_student(record_id: UUID, principal: Principal = Depends(require_roles
 
 
 @router.get("/parents", response_model=list[ParentResponse])
-def list_parents(search: str | None = None, limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0), principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
+def list_parents(search: str | None = None, limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0), principal: Principal = Depends(require_roles("OWNER", "ADMIN")), db: Session = Depends(get_db)):
     return _list("parents", ParentResponse, search, limit, offset, principal, db)
 
 
@@ -76,7 +79,12 @@ def create_parent(request: ParentCreate, principal: Principal = Depends(require_
 
 
 @router.get("/parents/{record_id}", response_model=ParentResponse)
-def get_parent(record_id: UUID, principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
+def get_parent(record_id: UUID, principal: Principal = Depends(require_roles("OWNER", "ADMIN", "PARENT")), db: Session = Depends(get_db)):
+    if principal.role == "PARENT":
+        from app.models import Parent
+        parent = db.get(Parent, record_id)
+        if not parent or parent.organization_id != principal.organization_id or parent.user_id != principal.user.id:
+            raise HTTPException(status_code=404, detail="Parent not found")
     return people.get_record(db, principal.organization_id, "parents", record_id)
 
 
@@ -91,7 +99,7 @@ def delete_parent(record_id: UUID, principal: Principal = Depends(require_roles(
 
 
 @router.get("/classes", response_model=list[ClassResponse])
-def list_classes(search: str | None = None, limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0), principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
+def list_classes(search: str | None = None, limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0), principal: Principal = Depends(require_roles("OWNER", "ADMIN", "TEACHER", "PARENT", "STUDENT")), db: Session = Depends(get_db)):
     return _list("classes", ClassResponse, search, limit, offset, principal, db)
 
 
@@ -101,7 +109,7 @@ def create_class(request: ClassCreate, principal: Principal = Depends(require_ro
 
 
 @router.get("/classes/{record_id}", response_model=ClassResponse)
-def get_class(record_id: UUID, principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
+def get_class(record_id: UUID, principal: Principal = Depends(require_roles("OWNER", "ADMIN", "TEACHER", "PARENT", "STUDENT")), db: Session = Depends(get_db)):
     return people.get_record(db, principal.organization_id, "classes", record_id)
 
 
@@ -116,7 +124,7 @@ def delete_class(record_id: UUID, principal: Principal = Depends(require_roles("
 
 
 @router.get("/teachers", response_model=list[TeacherResponse])
-def list_teachers(principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
+def list_teachers(principal: Principal = Depends(require_roles("OWNER", "ADMIN", "TEACHER")), db: Session = Depends(get_db)):
     return people.list_records(db, principal.organization_id, "teachers", None, 100, 0)
 
 
@@ -126,7 +134,7 @@ def create_teacher(request: TeacherCreate, principal: Principal = Depends(requir
 
 
 @router.get("/teachers/{record_id}", response_model=TeacherResponse)
-def get_teacher(record_id: UUID, principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
+def get_teacher(record_id: UUID, principal: Principal = Depends(require_roles("OWNER", "ADMIN", "TEACHER")), db: Session = Depends(get_db)):
     return people.get_record(db, principal.organization_id, "teachers", record_id)
 
 

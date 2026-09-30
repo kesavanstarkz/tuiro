@@ -17,13 +17,18 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import Principal, require_authenticated_user, require_roles
+from app.core.permissions import check_teacher_class_access
 from app.core.errors import TuiroError
 from app.db import get_db
 from app.models import Assignment, AuditLog, ChatMessage, ChatParticipant, ChatThread, ClassGroup, ClassStudent, FeePayment, Group, GroupAttendanceRecord, GroupAttendanceSession, GroupFee, GroupMember, GroupSchedule, OrganizationMember, Parent, Payment, Receipt, Student, StudentFee, StudentParent, User
 from app.services.receipts import generate_receipt_number
 
 router = APIRouter(prefix="/groups", tags=["groups"])
-EDITORS = ("OWNER", "ADMIN", "TEACHER")
+ADMINS = ("OWNER", "ADMIN")
+STAFF = ("OWNER", "ADMIN", "TEACHER")
+ALL_ROLES = ("OWNER", "ADMIN", "TEACHER", "PARENT", "STUDENT")
+PORTAL_READ = ("OWNER", "ADMIN", "PARENT", "STUDENT")
+EDITORS = STAFF
 
 
 class GroupInput(BaseModel):
@@ -127,7 +132,7 @@ def _group_payload(db: Session, group: Group) -> dict:
 
 
 @router.get("")
-def list_groups(principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
+def list_groups(principal: Principal = Depends(require_roles(*ALL_ROLES)), db: Session = Depends(get_db)):
     groups = db.scalars(select(Group).where(Group.organization_id == principal.organization_id).order_by(Group.created_at.desc())).all()
     if principal.role == "STUDENT":
         groups = [g for g in groups if db.scalar(select(GroupMember.id).join(Student, Student.id == GroupMember.student_id).where(GroupMember.group_id == g.id, GroupMember.removed_at.is_(None), Student.user_id == principal.user.id))]
@@ -137,7 +142,7 @@ def list_groups(principal: Principal = Depends(require_authenticated_user), db: 
 
 
 @router.post("", status_code=201)
-def create_group(request: GroupInput, principal: Principal = Depends(require_roles(*EDITORS)), db: Session = Depends(get_db)):
+def create_group(request: GroupInput, principal: Principal = Depends(require_roles(*ADMINS)), db: Session = Depends(get_db)):
     group_id = uuid4()
     group = Group(id=group_id, organization_id=principal.organization_id, name=request.name, created_by=principal.user.id)
     db.add(group)
@@ -150,11 +155,11 @@ def create_group(request: GroupInput, principal: Principal = Depends(require_rol
 
 
 @router.get("/{group_id:uuid}")
-def group_detail(group_id: UUID, principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
+def group_detail(group_id: UUID, principal: Principal = Depends(require_roles(*ALL_ROLES)), db: Session = Depends(get_db)):
     group = _record(db, Group, principal.organization_id, group_id)
     # Access is also established by an active child/student membership.
-    visible = group in [] or principal.role in EDITORS
-    if principal.role not in EDITORS:
+    visible = group in [] or principal.role in STAFF
+    if principal.role not in STAFF:
         visible = any(_can_view_student(db, principal, member.student_id) for member in db.scalars(select(GroupMember).where(GroupMember.group_id == group_id, GroupMember.removed_at.is_(None))))
     if not visible:
         raise TuiroError("FORBIDDEN", "You cannot view this group.", 403)
@@ -162,13 +167,13 @@ def group_detail(group_id: UUID, principal: Principal = Depends(require_authenti
 
 
 @router.get("/{group_id:uuid}/members")
-def group_members(group_id: UUID, principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
+def group_members(group_id: UUID, principal: Principal = Depends(require_roles(*STAFF)), db: Session = Depends(get_db)):
     group_detail(group_id, principal, db)
     return db.scalars(select(Student).join(GroupMember, GroupMember.student_id == Student.id).where(GroupMember.group_id == group_id, GroupMember.removed_at.is_(None))).all()
 
 
 @router.get("/students/{group_id:uuid}")
-def group_roster(group_id: UUID, principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
+def group_roster(group_id: UUID, principal: Principal = Depends(require_roles(*STAFF)), db: Session = Depends(get_db)):
     """Compatibility roster endpoint used by the attendance flow.
 
     An empty group is valid and intentionally returns `[]`; a malformed UUID is
@@ -178,7 +183,7 @@ def group_roster(group_id: UUID, principal: Principal = Depends(require_authenti
 
 
 @router.post("/{group_id:uuid}/members/{student_id:uuid}", status_code=201)
-def add_member(group_id: UUID, student_id: UUID, principal: Principal = Depends(require_roles(*EDITORS)), db: Session = Depends(get_db)):
+def add_member(group_id: UUID, student_id: UUID, principal: Principal = Depends(require_roles(*ADMINS)), db: Session = Depends(get_db)):
     _record(db, Group, principal.organization_id, group_id); _record(db, Student, principal.organization_id, student_id)
     member = db.scalar(select(GroupMember).where(GroupMember.group_id == group_id, GroupMember.student_id == student_id))
     if member:
@@ -208,7 +213,7 @@ def add_member(group_id: UUID, student_id: UUID, principal: Principal = Depends(
 
 
 @router.delete("/{group_id:uuid}/members/{student_id:uuid}", status_code=204)
-def remove_member(group_id: UUID, student_id: UUID, principal: Principal = Depends(require_roles(*EDITORS)), db: Session = Depends(get_db)):
+def remove_member(group_id: UUID, student_id: UUID, principal: Principal = Depends(require_roles(*ADMINS)), db: Session = Depends(get_db)):
     member = db.scalar(select(GroupMember).where(GroupMember.organization_id == principal.organization_id, GroupMember.group_id == group_id, GroupMember.student_id == student_id, GroupMember.removed_at.is_(None)))
     if member is None:
         raise TuiroError("MEMBERSHIP_NOT_FOUND", "Active group membership not found.", 404)
@@ -220,13 +225,13 @@ def remove_member(group_id: UUID, student_id: UUID, principal: Principal = Depen
 
 
 @router.get("/{group_id:uuid}/schedule")
-def schedules(group_id: UUID, principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
+def schedules(group_id: UUID, principal: Principal = Depends(require_roles(*ALL_ROLES)), db: Session = Depends(get_db)):
     group_detail(group_id, principal, db)
     return db.scalars(select(GroupSchedule).where(GroupSchedule.group_id == group_id).order_by(GroupSchedule.day_of_week, GroupSchedule.start_time)).all()
 
 
 @router.post("/{group_id:uuid}/schedule", status_code=201)
-def create_schedule(group_id: UUID, request: ScheduleInput, principal: Principal = Depends(require_roles(*EDITORS)), db: Session = Depends(get_db)):
+def create_schedule(group_id: UUID, request: ScheduleInput, principal: Principal = Depends(require_roles(*ADMINS)), db: Session = Depends(get_db)):
     _record(db, Group, principal.organization_id, group_id)
     if request.end_time <= request.start_time:
         raise TuiroError("INVALID_SCHEDULE", "End time must be after start time.", 422)
@@ -239,15 +244,17 @@ def _validate_target(db: Session, org: UUID, group_id: UUID | None, student_id: 
 
 
 @router.post("/assignments", status_code=201)
-def create_assignment(request: AssignmentInput, principal: Principal = Depends(require_roles(*EDITORS)), db: Session = Depends(get_db)):
+def create_assignment(request: AssignmentInput, principal: Principal = Depends(require_roles(*STAFF)), db: Session = Depends(get_db)):
     _validate_target(db, principal.organization_id, request.group_id, request.student_id)
+    if request.group_id:
+        check_teacher_class_access(db, principal, request.group_id)
     if request.overrides_id: _record(db, Assignment, principal.organization_id, request.overrides_id)
     item = Assignment(organization_id=principal.organization_id, created_by=principal.user.id, **request.model_dump(exclude={"attachments"}), attachments=json.dumps(request.attachments))
     db.add(item); db.commit(); db.refresh(item); return item
 
 
 @router.get("/assignments")
-def list_assignments(type: str | None = None, group_id: UUID | None = None, principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
+def list_assignments(type: str | None = None, group_id: UUID | None = None, principal: Principal = Depends(require_roles(*ALL_ROLES)), db: Session = Depends(get_db)):
     query = select(Assignment).where(Assignment.organization_id == principal.organization_id)
     if type:
         query = query.where(Assignment.type == type)
@@ -276,8 +283,10 @@ def list_assignments(type: str | None = None, group_id: UUID | None = None, prin
 
 
 @router.delete("/assignments/{assignment_id:uuid}", status_code=204)
-def delete_assignment(assignment_id: UUID, principal: Principal = Depends(require_roles(*EDITORS)), db: Session = Depends(get_db)):
+def delete_assignment(assignment_id: UUID, principal: Principal = Depends(require_roles(*STAFF)), db: Session = Depends(get_db)):
     item = _record(db, Assignment, principal.organization_id, assignment_id)
+    if item.group_id:
+        check_teacher_class_access(db, principal, item.group_id)
     db.delete(item)
     db.commit()
 
@@ -301,7 +310,7 @@ def _sync_group_fee_to_student_fees(db: Session, org_id: UUID, group_fee: GroupF
 
 
 @router.post("/fees", status_code=201)
-def create_fee(request: FeeInput, principal: Principal = Depends(require_roles(*EDITORS)), db: Session = Depends(get_db)):
+def create_fee(request: FeeInput, principal: Principal = Depends(require_roles(*ADMINS)), db: Session = Depends(get_db)):
     _validate_target(db, principal.organization_id, request.group_id, request.student_id)
     if request.overrides_id: _record(db, GroupFee, principal.organization_id, request.overrides_id)
     item = GroupFee(organization_id=principal.organization_id, created_by=principal.user.id, **request.model_dump())
@@ -333,15 +342,13 @@ def _fee_rows(db: Session, org: UUID):
 
 
 @router.get("/fees/needs-attention")
-def group_fee_needs_attention(principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
+def group_fee_needs_attention(principal: Principal = Depends(require_roles(*ADMINS)), db: Session = Depends(get_db)):
     rows = _fee_rows(db, principal.organization_id)
-    if principal.role not in EDITORS:
-        rows = [row for row in rows if _can_view_student(db, principal, row["student_id"])]
     return [row for row in rows if row["status"] != "PAID"]
 
 
 @router.post("/fees/{fee_id:uuid}/payments", status_code=201)
-def pay_group_fee(fee_id: UUID, request: FeePaymentInput, principal: Principal = Depends(require_roles(*EDITORS)), db: Session = Depends(get_db)):
+def pay_group_fee(fee_id: UUID, request: FeePaymentInput, principal: Principal = Depends(require_roles(*ADMINS)), db: Session = Depends(get_db)):
     fee = db.scalar(select(GroupFee).where(GroupFee.id == fee_id, GroupFee.organization_id == principal.organization_id).with_for_update())
     if fee is None:
         raise TuiroError("RESOURCE_NOT_FOUND", "The requested resource was not found.", 404)
@@ -429,8 +436,9 @@ def pay_group_fee(fee_id: UUID, request: FeePaymentInput, principal: Principal =
 
 
 @router.post("/{group_id:uuid}/attendance", status_code=201)
-def save_group_attendance(group_id: UUID, request: GroupAttendanceInput, principal: Principal = Depends(require_roles(*EDITORS)), db: Session = Depends(get_db)):
+def save_group_attendance(group_id: UUID, request: GroupAttendanceInput, principal: Principal = Depends(require_roles(*STAFF)), db: Session = Depends(get_db)):
     _record(db, Group, principal.organization_id, group_id)
+    check_teacher_class_access(db, principal, group_id)
     active_ids = set(db.scalars(select(GroupMember.student_id).where(GroupMember.group_id == group_id, GroupMember.removed_at.is_(None))))
     if {record.student_id for record in request.records} - active_ids:
         raise TuiroError("INVALID_ROSTER", "Attendance may only be saved for active group members.", 422)
@@ -444,14 +452,14 @@ def save_group_attendance(group_id: UUID, request: GroupAttendanceInput, princip
 
 
 @router.get("/{group_id:uuid}/attendance")
-def group_attendance(group_id: UUID, session_date: date = Query(...), principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
+def group_attendance(group_id: UUID, session_date: date = Query(...), principal: Principal = Depends(require_roles(*STAFF)), db: Session = Depends(get_db)):
     group_detail(group_id, principal, db)
     session = db.scalar(select(GroupAttendanceSession).where(GroupAttendanceSession.organization_id == principal.organization_id, GroupAttendanceSession.group_id == group_id, GroupAttendanceSession.session_date == session_date))
     return {"session": session, "records": [] if session is None else db.scalars(select(GroupAttendanceRecord).where(GroupAttendanceRecord.session_id == session.id)).all()}
 
 
 @router.get("/{group_id:uuid}/attendance/history")
-def group_attendance_history(group_id: UUID, principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
+def group_attendance_history(group_id: UUID, principal: Principal = Depends(require_roles(*STAFF)), db: Session = Depends(get_db)):
     """Daily roll-up for a group; individual facts remain in attendance records."""
     group_detail(group_id, principal, db)
     sessions = db.scalars(select(GroupAttendanceSession).where(GroupAttendanceSession.organization_id == principal.organization_id, GroupAttendanceSession.group_id == group_id).order_by(GroupAttendanceSession.session_date.desc())).all()
@@ -459,7 +467,7 @@ def group_attendance_history(group_id: UUID, principal: Principal = Depends(requ
 
 
 @router.get("/students/{student_id:uuid}/attendance")
-def student_group_attendance(student_id: UUID, principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
+def student_group_attendance(student_id: UUID, principal: Principal = Depends(require_roles(*ALL_ROLES)), db: Session = Depends(get_db)):
     _require_student_access(db, principal, student_id)
     return db.scalars(select(GroupAttendanceRecord).join(GroupAttendanceSession, GroupAttendanceSession.id == GroupAttendanceRecord.session_id).where(GroupAttendanceSession.organization_id == principal.organization_id, GroupAttendanceRecord.student_id == student_id).order_by(GroupAttendanceSession.session_date.desc())).all()
 
@@ -492,13 +500,13 @@ def _merged(db: Session, org: UUID, student_id: UUID):
 
 
 @router.get("/students/{student_id}/view")
-def student_merged_view(student_id: UUID, principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
+def student_merged_view(student_id: UUID, principal: Principal = Depends(require_roles(*PORTAL_READ)), db: Session = Depends(get_db)):
     _require_student_access(db, principal, student_id)
     return _merged(db, principal.organization_id, student_id)
 
 
 @router.post("/{group_id:uuid}/chat", status_code=201)
-def post_group_message(group_id: UUID, request: MessageInput, principal: Principal = Depends(require_roles(*EDITORS, "STUDENT")), db: Session = Depends(get_db)):
+def post_group_message(group_id: UUID, request: MessageInput, principal: Principal = Depends(require_roles(*ALL_ROLES)), db: Session = Depends(get_db)):
     _record(db, Group, principal.organization_id, group_id)
     if principal.role == "STUDENT" and not db.scalar(select(GroupMember.id).join(Student, Student.id == GroupMember.student_id).where(GroupMember.group_id == group_id, GroupMember.removed_at.is_(None), Student.user_id == principal.user.id)):
         raise TuiroError("FORBIDDEN", "You are not an active member of this group.", 403)
@@ -510,7 +518,7 @@ def post_group_message(group_id: UUID, request: MessageInput, principal: Princip
 
 
 @router.get("/{group_id:uuid}/chat")
-def group_messages(group_id: UUID, principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
+def group_messages(group_id: UUID, principal: Principal = Depends(require_roles(*ALL_ROLES)), db: Session = Depends(get_db)):
     group_detail(group_id, principal, db)
     if principal.role == "PARENT":
         raise TuiroError("FORBIDDEN", "Parents do not have chat access.", 403)
@@ -538,9 +546,9 @@ def _direct_thread(db: Session, org: UUID, first_user_id: UUID, second_user_id: 
 
 
 @router.post("/chats/direct/{participant_id:uuid}", status_code=201)
-def post_direct_message(participant_id: UUID, request: MessageInput, principal: Principal = Depends(require_roles(*EDITORS, "STUDENT")), db: Session = Depends(get_db)):
+def post_direct_message(participant_id: UUID, request: MessageInput, principal: Principal = Depends(require_roles(*ALL_ROLES)), db: Session = Depends(get_db)):
     participant = db.scalar(select(OrganizationMember).where(OrganizationMember.organization_id == principal.organization_id, OrganizationMember.user_id == participant_id))
-    if participant_id == principal.user.id or participant is None or participant.role not in {*EDITORS, "STUDENT"}:
+    if participant_id == principal.user.id or participant is None or participant.role not in ALL_ROLES:
         raise TuiroError("RESOURCE_NOT_FOUND", "The requested participant was not found.", 404)
     thread = _direct_thread(db, principal.organization_id, principal.user.id, participant_id)
     message = ChatMessage(thread_id=thread.id, sender_id=principal.user.id, text=request.text, attachment=request.attachment)
@@ -548,9 +556,9 @@ def post_direct_message(participant_id: UUID, request: MessageInput, principal: 
 
 
 @router.get("/chats/direct/{participant_id:uuid}")
-def direct_messages(participant_id: UUID, principal: Principal = Depends(require_roles(*EDITORS, "STUDENT")), db: Session = Depends(get_db)):
+def direct_messages(participant_id: UUID, principal: Principal = Depends(require_roles(*ALL_ROLES)), db: Session = Depends(get_db)):
     participant = db.scalar(select(OrganizationMember).where(OrganizationMember.organization_id == principal.organization_id, OrganizationMember.user_id == participant_id))
-    if participant_id == principal.user.id or participant is None or participant.role not in {*EDITORS, "STUDENT"}:
+    if participant_id == principal.user.id or participant is None or participant.role not in ALL_ROLES:
         raise TuiroError("RESOURCE_NOT_FOUND", "The requested participant was not found.", 404)
     thread = _find_direct_thread(db, principal.organization_id, principal.user.id, participant_id)
     if thread is None:
