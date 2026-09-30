@@ -1,11 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 
-import { useDashboard, useGroupAttendance, useGroupMembers, useGroups, useSaveGroupAttendance } from "@/api/hooks";
+import { useGroupAttendance, useGroupMembers, useGroups, useSaveGroupAttendance } from "@/api/hooks";
 import { Avatar, Badge, Button, Card, EmptyState, ErrorState, LoadingState, PageHeader, Screen, SectionHeader } from "@/components";
 import { colors, radius, spacing, typography } from "@/theme";
-import { getOrgToday } from "@/utils/datetime";
 
 type Status = "PRESENT" | "ABSENT" | "LATE" | "EXCUSED";
 const statuses: Status[] = ["PRESENT", "ABSENT", "LATE", "EXCUSED"];
@@ -18,14 +17,8 @@ const statusMeta: Record<Status, { icon: string; tone: "success" | "danger" | "w
 
 export default function AttendanceScreen() {
     const { groupId, date: dateParam } = useLocalSearchParams<{ groupId?: string; date?: string }>();
-    const dashboard = useDashboard();
     const [selectedGroup, setSelectedGroup] = useState<string | undefined>(groupId);
-    const [date, setDate] = useState(dateParam ?? getOrgToday(dashboard.data?.timezone));
-    useEffect(() => {
-        if (!dateParam && dashboard.data?.timezone) {
-            setDate(getOrgToday(dashboard.data.timezone));
-        }
-    }, [dateParam, dashboard.data?.timezone]);
+    const [date] = useState(dateParam ?? new Date().toISOString().slice(0, 10));
     const [statusesByStudent, setStatuses] = useState<Record<string, Status>>({});
     const [saving, setSaving] = useState(false);
     const [saved, setSaved] = useState(false);

@@ -1,6 +1,6 @@
 export type Id = string;
 export type Student = { id: Id; organization_id: Id; student_number: string; first_name: string; last_name: string; school?: string | null; grade?: string | null; joining_date?: string | null; status: string };
-export type Parent = { id: Id; name: string; phone?: string | null; email?: string | null; relationship?: string | null; status: string };
+export type Parent = { id: Id; name: string; phone?: string | null; email?: string | null; relationship?: string | null; status: string; is_primary?: boolean };
 export type Teacher = { id: Id; employee_number?: string | null; specialization?: string | null; joining_date?: string | null; status: string };
 export type ClassItem = { id: Id; name: string; subject?: string | null; description?: string | null; fee_amount: string | number; status: string };
 export type Fee = { id: Id; student_id: Id; student_name: string; billing_period: string; amount: string | number; amount_due: string | number; paid_amount: string | number; outstanding_amount: string | number; due_date: string; status: "PAID" | "PENDING" | "PARTIAL" | "OVERDUE" };

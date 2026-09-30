@@ -19,7 +19,7 @@ export default function TabsLayout() {
                     tabBar={(props) => (isDesktop ? null : <MobileTabBar {...(props as unknown as TabBarProps)} />)}
                     screenOptions={{ headerShown: false }}
                 >
-                    <Tabs.Screen name="index" options={{ title: "Home", tabBarIcon: icon("view-dashboard-outline", "view-dashboard") }} />
+                    <Tabs.Screen name="dashboard" options={{ title: "Home", tabBarIcon: icon("view-dashboard-outline", "view-dashboard") }} />
                     <Tabs.Screen name="students" options={{ title: "Students", tabBarIcon: icon("account-school-outline", "account-school") }} />
                     <Tabs.Screen name="attendance" options={{ title: "Attendance", tabBarIcon: icon("calendar-check-outline", "calendar-check") }} />
                     <Tabs.Screen name="fees" options={{ title: "Fees", tabBarIcon: icon("cash-multiple", "cash-multiple") }} />
@@ -101,8 +101,16 @@ function DesktopSidebar() {
     const pathname = usePathname();
     const { user, signOut } = useAuthStore();
 
+    const isItemActive = (route: string) => {
+        if (route === "/(app)/(tabs)/dashboard" || route === "/dashboard") {
+            return pathname === "/dashboard" || pathname === "/" || pathname === "/(app)/(tabs)" || pathname === "/(app)/(tabs)/dashboard";
+        }
+        const cleanRoute = route.replace(/^\/\(app\)\/\(tabs\)/, "");
+        return pathname === cleanRoute || pathname.startsWith(cleanRoute + "/");
+    };
+
     const mainNav = [
-        { label: "Home", route: "/(app)/(tabs)", icon: "view-dashboard-outline" as const, activeIcon: "view-dashboard" as const },
+        { label: "Home", route: "/(app)/(tabs)/dashboard", icon: "view-dashboard-outline" as const, activeIcon: "view-dashboard" as const },
         { label: "Students", route: "/(app)/(tabs)/students", icon: "account-school-outline" as const, activeIcon: "account-school" as const },
         { label: "Attendance", route: "/(app)/(tabs)/attendance", icon: "calendar-check-outline" as const, activeIcon: "calendar-check" as const },
         { label: "Fees", route: "/(app)/(tabs)/fees", icon: "cash-multiple" as const, activeIcon: "cash-multiple" as const },
@@ -122,6 +130,7 @@ function DesktopSidebar() {
 
     const businessNav = [
         { label: "Receipts", route: "/receipts", icon: "receipt-text-outline" as const },
+        { label: "Payments", route: "/payments", icon: "cash-check" as const },
         { label: "Reports", route: "/reports", icon: "chart-line" as const },
     ];
 
@@ -141,7 +150,7 @@ function DesktopSidebar() {
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.sidebarScroll}>
                 <View style={styles.sidebarGroup}>
                     {mainNav.map((item) => {
-                        const active = pathname === item.route || (item.route === "/(app)/(tabs)" && pathname === "/");
+                        const active = isItemActive(item.route);
                         return (
                             <Pressable
                                 key={item.route}
@@ -162,7 +171,7 @@ function DesktopSidebar() {
                 <Text style={styles.sidebarSectionTitle}>ACADEMIC</Text>
                 <View style={styles.sidebarGroup}>
                     {academicNav.map((item) => {
-                        const active = pathname.startsWith(item.route);
+                        const active = isItemActive(item.route);
                         return (
                             <Pressable
                                 key={item.route}
@@ -179,7 +188,7 @@ function DesktopSidebar() {
                 <Text style={styles.sidebarSectionTitle}>PEOPLE</Text>
                 <View style={styles.sidebarGroup}>
                     {peopleNav.map((item) => {
-                        const active = pathname.startsWith(item.route);
+                        const active = isItemActive(item.route);
                         return (
                             <Pressable
                                 key={item.route}
@@ -196,7 +205,7 @@ function DesktopSidebar() {
                 <Text style={styles.sidebarSectionTitle}>BUSINESS</Text>
                 <View style={styles.sidebarGroup}>
                     {businessNav.map((item) => {
-                        const active = pathname.startsWith(item.route);
+                        const active = isItemActive(item.route);
                         return (
                             <Pressable
                                 key={item.route}
@@ -213,7 +222,7 @@ function DesktopSidebar() {
                 <Text style={styles.sidebarSectionTitle}>SYSTEM</Text>
                 <View style={styles.sidebarGroup}>
                     {systemNav.map((item) => {
-                        const active = pathname.startsWith(item.route);
+                        const active = isItemActive(item.route);
                         return (
                             <Pressable
                                 key={item.route}

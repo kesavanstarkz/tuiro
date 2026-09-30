@@ -220,27 +220,29 @@ export default function HomeworkScreen() {
                         />
                     }
                     renderItem={({ item }) => (
-                        <Card style={styles.hwCard}>
-                            <View style={styles.hwHeader}>
-                                <View style={styles.hwInfo}>
-                                    <Text style={styles.hwTitle}>{item.title}</Text>
-                                    <Text style={styles.hwTarget}>
-                                        {item.source === "Group" ? `Batch: ${item.target_name}` : `Student: ${item.target_name}`}
-                                        {item.due_date ? ` · Due ${item.due_date}` : ""}
-                                    </Text>
+                        <Pressable onPress={() => router.push(`/homework/${item.id}` as never)}>
+                            <Card style={styles.hwCard}>
+                                <View style={styles.hwHeader}>
+                                    <View style={styles.hwInfo}>
+                                        <Text style={styles.hwTitle}>{item.title}</Text>
+                                        <Text style={styles.hwTarget}>
+                                            {item.source === "Group" ? `Batch: ${item.target_name}` : `Student: ${item.target_name}`}
+                                            {item.due_date ? ` · Due ${item.due_date}` : ""}
+                                        </Text>
+                                    </View>
+                                    <Pressable
+                                        onPress={() => confirmDelete(item.id, item.title)}
+                                        style={styles.deleteBtn}
+                                        accessibilityRole="button"
+                                    >
+                                        <MaterialCommunityIcons name="trash-can-outline" size={20} color={colors.red} />
+                                    </Pressable>
                                 </View>
-                                <Pressable
-                                    onPress={() => confirmDelete(item.id, item.title)}
-                                    style={styles.deleteBtn}
-                                    accessibilityRole="button"
-                                >
-                                    <MaterialCommunityIcons name="trash-can-outline" size={20} color={colors.red} />
-                                </Pressable>
-                            </View>
-                            {Boolean(item.description) && (
-                                <Text style={styles.hwDescription}>{item.description}</Text>
-                            )}
-                        </Card>
+                                {Boolean(item.description) && (
+                                    <Text style={styles.hwDescription}>{item.description}</Text>
+                                )}
+                            </Card>
+                        </Pressable>
                     )}
                 />
             )}

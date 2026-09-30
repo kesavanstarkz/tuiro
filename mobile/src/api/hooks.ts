@@ -19,7 +19,7 @@ export type { AttendanceSessionResponse, AttendanceStatus, ClassItem, Fee, Stude
 
 const invalidate = (client: ReturnType<typeof useQueryClient>, keys: string[][]) => keys.forEach((queryKey) => void client.invalidateQueries({ queryKey }));
 export function useDashboard() { return useQuery({ queryKey: ["dashboard"], queryFn: reportsApi.dashboard, refetchOnReconnect: true }); }
-export function useStudents(search?: string, status?: string) { return useQuery({ queryKey: ["students", search ?? "", status ?? "ACTIVE"], queryFn: () => studentsApi.list(search, status), refetchOnReconnect: true }); }
+export function useStudents(search?: string) { return useQuery({ queryKey: ["students", search ?? ""], queryFn: () => studentsApi.list(search), refetchOnReconnect: true }); }
 export function useStudent(id?: string) { return useQuery({ queryKey: ["student", id], queryFn: () => studentsApi.get(id!), enabled: Boolean(id) }); }
 export function useParents(search?: string) { return useQuery({ queryKey: ["parents", search ?? ""], queryFn: () => parentsApi.list(search) }); }
 export function useTeachers() { return useQuery({ queryKey: ["teachers"], queryFn: teachersApi.list }); }
@@ -35,12 +35,18 @@ export function useStudentParents(studentId?: string) { return useQuery({ queryK
 export function useParentStudents(parentId?: string) { return useQuery({ queryKey: ["parent-students", parentId], queryFn: () => parentsApi.students(parentId!), enabled: Boolean(parentId) }); }
 export function useAttendanceHistory(sessionDate?: string) { return useQuery({ queryKey: ["attendance-history", sessionDate ?? ""], queryFn: () => attendanceApi.list(sessionDate) }); }
 export function useAttendanceSession(classId?: string, sessionDate?: string) { return useQuery({ queryKey: ["attendance-session", classId, sessionDate], queryFn: () => attendanceApi.session(classId!, sessionDate!), enabled: Boolean(classId && sessionDate) }); }
-export function useFees() { return useQuery({ queryKey: ["fees"], queryFn: feesApi.list }); }
+export function useFees() { return useQuery({ queryKey: ["fees"], queryFn: () => feesApi.list() }); }
+export function useFee(id?: string) { return useQuery({ queryKey: ["fee", id], queryFn: () => feesApi.get(id!), enabled: Boolean(id) }); }
+export function useStudentFees(studentId?: string) { return useQuery({ queryKey: ["student-fees", studentId], queryFn: () => feesApi.list(undefined, studentId), enabled: Boolean(studentId) }); }
 export function usePendingFees() { return useQuery({ queryKey: ["pending-fees"], queryFn: feesApi.pending, refetchOnReconnect: true }); }
 export function usePayments() { return useQuery({ queryKey: ["payments"], queryFn: paymentsApi.list, refetchOnReconnect: true }); }
+export function usePayment(id?: string) { return useQuery({ queryKey: ["payment", id], queryFn: () => paymentsApi.get(id!), enabled: Boolean(id) }); }
 export function useHomework() { return useQuery({ queryKey: ["homework"], queryFn: homeworkApi.list }); }
+export function useHomeworkItem(id?: string) { return useQuery({ queryKey: ["homework-item", id], queryFn: () => homeworkApi.get(id!), enabled: Boolean(id) }); }
 export function useTests() { return useQuery({ queryKey: ["tests"], queryFn: testsApi.list }); }
+export function useTest(id?: string) { return useQuery({ queryKey: ["test", id], queryFn: () => testsApi.get(id!), enabled: Boolean(id) }); }
 export function useTestMarks(testId?: string) { return useQuery({ queryKey: ["test-marks", testId], queryFn: () => testsApi.marks(testId!), enabled: Boolean(testId) }); }
+export function useStudentTests(studentId?: string) { return useQuery({ queryKey: ["student-tests", studentId], queryFn: () => testsApi.studentMarks(studentId!), enabled: Boolean(studentId) }); }
 export function useSchedules() { return useQuery({ queryKey: ["schedule"], queryFn: schedulesApi.list }); }
 export function useNotifications() { return useQuery({ queryKey: ["notifications"], queryFn: notificationsApi.list }); }
 export function useSettings() { return useQuery({ queryKey: ["settings"], queryFn: settingsApi.get }); }

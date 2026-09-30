@@ -6,7 +6,7 @@ import { useAuthStore } from "@/store/auth";
 export default function IndexScreen() {
     const { user, hydrated } = useAuthStore();
     if (!hydrated) return <View style={styles.loading}><ActivityIndicator color="#c45d3c" /></View>;
-    return <Redirect href={user ? "/(app)/(tabs)" : "/auth/login"} />;
+    return <Redirect href={user ? "/dashboard" : "/auth/login"} />;
 }
 
 const styles = StyleSheet.create({

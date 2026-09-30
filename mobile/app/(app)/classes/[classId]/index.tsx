@@ -131,16 +131,21 @@ export default function ClassDetailScreen() {
                                 key={student.id}
                                 style={[styles.memberRow, idx === memberList.length - 1 && styles.memberRowLast]}
                             >
-                                <Avatar name={`${student.first_name} ${student.last_name}`} size={42} />
-                                <View style={styles.memberInfo}>
-                                    <Text style={styles.memberName}>
-                                        {student.first_name} {student.last_name}
-                                    </Text>
-                                    <Text style={styles.memberMeta}>
-                                        {student.grade ? student.grade : "Student"}
-                                        {student.student_number ? ` · #${student.student_number}` : ""}
-                                    </Text>
-                                </View>
+                                <Pressable
+                                    style={{ flex: 1, flexDirection: "row", alignItems: "center" }}
+                                    onPress={() => router.push(`/students/${student.id}` as never)}
+                                >
+                                    <Avatar name={`${student.first_name} ${student.last_name}`} size={42} />
+                                    <View style={styles.memberInfo}>
+                                        <Text style={styles.memberName}>
+                                            {student.first_name} {student.last_name}
+                                        </Text>
+                                        <Text style={styles.memberMeta}>
+                                            {student.grade ? student.grade : "Student"}
+                                            {student.student_number ? ` · #${student.student_number}` : ""}
+                                        </Text>
+                                    </View>
+                                </Pressable>
                                 <Pressable
                                     onPress={() => confirmRemove(student.id, `${student.first_name} ${student.last_name}`)}
                                     style={styles.removeBtn}

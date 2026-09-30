@@ -23,6 +23,7 @@ export const colors = {
 
     // Functional Statuses
     success: "#2F7D52",
+    green: "#2F7D52",
     warning: "#C1622D",
     danger: "#B3261E",
     red: "#B3261E",

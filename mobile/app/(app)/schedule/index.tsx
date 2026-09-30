@@ -1,12 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Alert, FlatList, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { router } from "expo-router";
 
-import { useClasses, useCreateSchedule, useDashboard, useSchedules } from "@/api/hooks";
+import { useClasses, useCreateSchedule, useSchedules } from "@/api/hooks";
 import { Button, Card, Chip, EmptyState, ErrorState, IconButton, LoadingState, PageHeader, Screen, TuiroInput } from "@/components";
 import { colors, radius, spacing, typography } from "@/theme";
-import { getOrgDayOfWeek } from "@/utils/datetime";
 
 const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
@@ -14,14 +13,8 @@ export default function ScheduleScreen() {
     const schedules = useSchedules();
     const classes = useClasses();
     const create = useCreateSchedule();
-    const dashboard = useDashboard();
 
-    const [selectedDay, setSelectedDay] = useState(() => getOrgDayOfWeek(dashboard.data?.timezone));
-    useEffect(() => {
-        if (dashboard.data?.timezone) {
-            setSelectedDay(getOrgDayOfWeek(dashboard.data.timezone));
-        }
-    }, [dashboard.data?.timezone]);
+    const [selectedDay, setSelectedDay] = useState(new Date().getDay() === 0 ? 6 : new Date().getDay() - 1);
     const [open, setOpen] = useState(false);
     const [classId, setClassId] = useState("");
     const [day, setDay] = useState(selectedDay);

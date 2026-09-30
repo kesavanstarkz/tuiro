@@ -235,13 +235,27 @@ def create_fee(request: FeeCreateInput, principal: Principal = Depends(require_r
 
 
 @router.get("/fees")
-def list_fees(status_filter: str | None = Query(None, alias="status"), principal: Principal = Depends(require_roles("OWNER", "ADMIN", "PARENT", "STUDENT")), db: Session = Depends(get_db)):
+def list_fees(
+    status_filter: str | None = Query(None, alias="status"),
+    student_id: UUID | None = Query(None, alias="student_id"),
+    principal: Principal = Depends(require_roles("OWNER", "ADMIN", "PARENT", "STUDENT")),
+    db: Session = Depends(get_db),
+):
     query = select(StudentFee).where(StudentFee.organization_id == principal.organization_id).order_by(StudentFee.due_date)
     if principal.role == "PARENT":
         student_ids = get_parent_student_ids(db, principal)
-        query = query.where(StudentFee.student_id.in_(student_ids))
+        if student_id:
+            if student_id not in student_ids:
+                return []
+            query = query.where(StudentFee.student_id == student_id)
+        else:
+            query = query.where(StudentFee.student_id.in_(student_ids))
     elif principal.role == "STUDENT":
-        student_id = get_student_self_id(db, principal)
+        self_id = get_student_self_id(db, principal)
+        if student_id and student_id != self_id:
+            return []
+        query = query.where(StudentFee.student_id == self_id)
+    elif student_id:
         query = query.where(StudentFee.student_id == student_id)
     if status_filter:
         query = query.where(StudentFee.status == status_filter)
@@ -262,6 +276,20 @@ def pending_fees(principal: Principal = Depends(require_roles("OWNER", "ADMIN", 
     fees = db.scalars(query).all()
     payload = [_fee_payload(db, fee) for fee in fees]
     return [item for item in payload if item["status"] in {"PENDING", "PARTIAL", "OVERDUE"}]
+
+
+@router.get("/fees/{fee_id}")
+def get_fee(fee_id: UUID, principal: Principal = Depends(require_roles("OWNER", "ADMIN", "PARENT", "STUDENT")), db: Session = Depends(get_db)):
+    fee = _org_record(db, StudentFee, principal.organization_id, fee_id)
+    if principal.role == "PARENT":
+        student_ids = get_parent_student_ids(db, principal)
+        if fee.student_id not in student_ids:
+            raise TuiroError("RESOURCE_NOT_FOUND", "The requested resource was not found.", 404)
+    elif principal.role == "STUDENT":
+        student_id = get_student_self_id(db, principal)
+        if fee.student_id != student_id:
+            raise TuiroError("RESOURCE_NOT_FOUND", "The requested resource was not found.", 404)
+    return _fee_payload(db, fee)
 
 
 @router.post("/payments", status_code=201)
@@ -302,6 +330,20 @@ def list_payments(principal: Principal = Depends(require_roles("OWNER", "ADMIN",
         student_id = get_student_self_id(db, principal)
         query = query.where(Payment.student_id == student_id)
     return [_payment_payload(db, payment) for payment in db.scalars(query).all()]
+
+
+@router.get("/payments/{payment_id}")
+def get_payment(payment_id: UUID, principal: Principal = Depends(require_roles("OWNER", "ADMIN", "PARENT", "STUDENT")), db: Session = Depends(get_db)):
+    payment = _org_record(db, Payment, principal.organization_id, payment_id)
+    if principal.role == "PARENT":
+        student_ids = get_parent_student_ids(db, principal)
+        if payment.student_id not in student_ids:
+            raise TuiroError("RESOURCE_NOT_FOUND", "The requested resource was not found.", 404)
+    elif principal.role == "STUDENT":
+        student_id = get_student_self_id(db, principal)
+        if payment.student_id != student_id:
+            raise TuiroError("RESOURCE_NOT_FOUND", "The requested resource was not found.", 404)
+    return _payment_payload(db, payment)
 
 
 @router.get("/receipts")
@@ -397,6 +439,20 @@ def list_homework(principal: Principal = Depends(require_roles("OWNER", "ADMIN",
     return db.scalars(select(Homework).where(Homework.organization_id == principal.organization_id).order_by(Homework.due_date)).all()
 
 
+@router.get("/homework/{homework_id}")
+def get_homework(homework_id: UUID, principal: Principal = Depends(require_roles("OWNER", "ADMIN", "TEACHER", "PARENT", "STUDENT")), db: Session = Depends(get_db)):
+    record = _org_record(db, Homework, principal.organization_id, homework_id)
+    class_group = db.get(ClassGroup, record.class_id)
+    return {
+        "id": record.id,
+        "class_id": record.class_id,
+        "class_name": class_group.name if class_group else "Class",
+        "title": record.title,
+        "description": record.description,
+        "due_date": record.due_date,
+    }
+
+
 @router.patch("/homework/{homework_id}")
 def update_homework(homework_id: UUID, request: HomeworkUpdate, principal: Principal = Depends(require_roles("OWNER", "ADMIN", "TEACHER")), db: Session = Depends(get_db)):
     record = _org_record(db, Homework, principal.organization_id, homework_id)
@@ -429,6 +485,22 @@ def create_test(request: TestInput, principal: Principal = Depends(require_roles
 @router.get("/tests")
 def list_tests(principal: Principal = Depends(require_roles("OWNER", "ADMIN", "TEACHER", "PARENT", "STUDENT")), db: Session = Depends(get_db)):
     return db.scalars(select(AcademicTest).where(AcademicTest.organization_id == principal.organization_id).order_by(AcademicTest.test_date.desc())).all()
+
+
+@router.get("/tests/{test_id}")
+def get_test(test_id: UUID, principal: Principal = Depends(require_roles("OWNER", "ADMIN", "TEACHER", "PARENT", "STUDENT")), db: Session = Depends(get_db)):
+    test = _org_record(db, AcademicTest, principal.organization_id, test_id)
+    class_group = db.get(ClassGroup, test.class_id)
+    return {
+        "id": test.id,
+        "class_id": test.class_id,
+        "class_name": class_group.name if class_group else "Class",
+        "name": test.name,
+        "title": test.name,
+        "subject": test.subject,
+        "test_date": test.test_date,
+        "maximum_marks": test.maximum_marks,
+    }
 
 
 @router.patch("/tests/{test_id}")
@@ -479,6 +551,38 @@ def list_marks(test_id: UUID, principal: Principal = Depends(require_roles("OWNE
         query = query.where(TestMark.student_id == student_id)
     marks = db.scalars(query).all()
     return [{"id": mark.id, "student_id": mark.student_id, "student_name": _student_name(db, mark.student_id), "marks": mark.marks, "maximum_marks": test.maximum_marks, "percentage": round(float(mark.marks / test.maximum_marks * 100), 2), "grade": mark.grade, "remarks": mark.remarks} for mark in marks]
+
+
+@router.get("/students/{student_id}/tests")
+def student_tests(student_id: UUID, principal: Principal = Depends(require_roles("OWNER", "ADMIN", "TEACHER", "PARENT", "STUDENT")), db: Session = Depends(get_db)):
+    _org_record(db, Student, principal.organization_id, student_id)
+    if principal.role == "PARENT":
+        allowed = get_parent_student_ids(db, principal)
+        if student_id not in allowed:
+            raise TuiroError("RESOURCE_NOT_FOUND", "The requested resource was not found.", 404)
+    elif principal.role == "STUDENT":
+        if student_id != get_student_self_id(db, principal):
+            raise TuiroError("RESOURCE_NOT_FOUND", "The requested resource was not found.", 404)
+
+    marks = db.scalars(select(TestMark).where(TestMark.organization_id == principal.organization_id, TestMark.student_id == student_id)).all()
+    results = []
+    for mark in marks:
+        test = db.get(AcademicTest, mark.test_id)
+        if test:
+            results.append({
+                "id": mark.id,
+                "test_id": test.id,
+                "test_name": test.name,
+                "test_title": test.name,
+                "subject": test.subject,
+                "test_date": test.test_date,
+                "marks": mark.marks,
+                "maximum_marks": test.maximum_marks,
+                "percentage": round(float(mark.marks / test.maximum_marks * 100), 2) if test.maximum_marks else 0,
+                "grade": mark.grade,
+                "remarks": mark.remarks,
+            })
+    return results
 
 
 @router.get("/schedule")

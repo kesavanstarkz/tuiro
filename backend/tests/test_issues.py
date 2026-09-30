@@ -1031,6 +1031,82 @@ def test_i14_organization_currency_settings(client: TestClient = None):
     db.close()
 
 
+def test_r3_endpoints_and_navigation(client: TestClient = None):
+    c = client or TestClient(app)
+    email = f"r3-{uuid4().hex}@example.com"
+    reg = c.post("/api/v1/auth/register", json={
+        "email": email,
+        "password": "password123",
+        "display_name": "R3 Owner",
+        "organization_name": "R3 Org",
+    })
+    assert reg.status_code == 201
+    token = reg.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # 1. Create class, student, enroll
+    cls_res = c.post("/api/v1/classes", json={"name": "Physics Batch", "fee_amount": 300.0}, headers=headers)
+    assert cls_res.status_code == 201
+    class_id = cls_res.json()["id"]
+
+    stu_res = c.post("/api/v1/students", json={"first_name": "Alice", "last_name": "Wonder", "student_number": f"STU-{uuid4().hex[:6]}"}, headers=headers)
+    assert stu_res.status_code == 201
+    student_id = stu_res.json()["id"]
+
+    c.post(f"/api/v1/classes/{class_id}/students", json={"student_id": student_id}, headers=headers)
+
+    # 2. Homework GET /homework/{id}
+    hw_res = c.post("/api/v1/homework", json={"class_id": class_id, "title": "Wave Optics Problems", "description": "Solve ch 5", "due_date": "2026-11-10"}, headers=headers)
+    assert hw_res.status_code == 201
+    hw_id = hw_res.json()["id"]
+
+    hw_detail = c.get(f"/api/v1/homework/{hw_id}", headers=headers)
+    assert hw_detail.status_code == 200
+    assert hw_detail.json()["id"] == hw_id
+    assert hw_detail.json()["class_name"] == "Physics Batch"
+    assert hw_detail.json()["title"] == "Wave Optics Problems"
+
+    # 3. Test GET /tests/{id}, POST mark, and GET /students/{id}/tests
+    test_res = c.post("/api/v1/tests", json={"class_id": class_id, "name": "Optics Midterm", "subject": "Physics", "test_date": "2026-11-15", "maximum_marks": 50}, headers=headers)
+    assert test_res.status_code == 201
+    test_id = test_res.json()["id"]
+
+    test_detail = c.get(f"/api/v1/tests/{test_id}", headers=headers)
+    assert test_detail.status_code == 200
+    assert test_detail.json()["id"] == test_id
+    assert test_detail.json()["maximum_marks"] == 50
+
+    mark_res = c.post(f"/api/v1/tests/{test_id}/marks", json={"student_id": student_id, "marks": 45, "grade": "A", "remarks": "Excellent"}, headers=headers)
+    assert mark_res.status_code == 201
+
+    stu_tests = c.get(f"/api/v1/students/{student_id}/tests", headers=headers)
+    assert stu_tests.status_code == 200
+    assert len(stu_tests.json()) == 1
+    assert stu_tests.json()[0]["marks"] == 45
+    assert stu_tests.json()[0]["percentage"] == 90.0
+
+    # 4. Fee GET /fees/{id} and Payment GET /payments/{id}
+    fee_gen = c.post("/api/v1/fees/generate", json={"class_id": class_id, "billing_period": f"BP-{uuid4().hex[:6]}", "amount": 300.0, "due_date": "2026-11-20"}, headers=headers)
+    assert fee_gen.status_code == 200
+    fees_list = c.get(f"/api/v1/fees?student_id={student_id}", headers=headers).json()
+    assert len(fees_list) >= 1
+    fee_id = fees_list[0]["id"]
+
+    fee_detail = c.get(f"/api/v1/fees/{fee_id}", headers=headers)
+    assert fee_detail.status_code == 200
+    assert fee_detail.json()["id"] == fee_id
+    assert float(fee_detail.json()["amount"]) == 300.0
+
+    pay_res = c.post("/api/v1/payments", json={"fee_id": fee_id, "amount": 300.0, "payment_method": "CASH", "reference": f"TXN-{uuid4().hex[:8]}"}, headers=headers)
+    assert pay_res.status_code == 201
+    payment_id = pay_res.json()["payment"]["id"]
+
+    pay_detail = c.get(f"/api/v1/payments/{payment_id}", headers=headers)
+    assert pay_detail.status_code == 200
+    assert pay_detail.json()["id"] == payment_id
+    assert float(pay_detail.json()["amount"]) == 300.0
+
+
 
 
 

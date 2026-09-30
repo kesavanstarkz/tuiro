@@ -44,12 +44,15 @@ export function PageHeader({
     title,
     subtitle,
     right,
+    action,
 }: {
     eyebrow?: string;
     title: string;
     subtitle?: string;
     right?: ReactNode;
+    action?: ReactNode;
 }) {
+    const rightContent = right ?? action;
     return (
         <View style={styles.header}>
             <View style={styles.headerCopy}>
@@ -57,7 +60,7 @@ export function PageHeader({
                 <Text style={styles.title}>{title}</Text>
                 {subtitle && <Text style={styles.subtitle}>{subtitle}</Text>}
             </View>
-            {right && <View style={styles.headerRight}>{right}</View>}
+            {rightContent && <View style={styles.headerRight}>{rightContent}</View>}
         </View>
     );
 }
@@ -123,10 +126,12 @@ export function Button({
     children,
     onPress,
     variant = "primary",
+    size = "md",
     disabled = false,
 }: PropsWithChildren<{
     onPress?: () => void;
-    variant?: "primary" | "secondary" | "ghost";
+    variant?: "primary" | "secondary" | "ghost" | "danger";
+    size?: "sm" | "md";
     disabled?: boolean;
 }>) {
     return (
@@ -136,6 +141,7 @@ export function Button({
             onPress={onPress}
             style={({ pressed }) => [
                 styles.button,
+                size === "sm" && styles.button_sm,
                 styles[`button_${variant}`],
                 pressed && styles.pressed,
                 disabled && styles.disabled,
@@ -144,11 +150,14 @@ export function Button({
             <Text
                 style={[
                     styles.buttonText,
+                    size === "sm" && styles.buttonText_sm,
                     variant === "primary"
                         ? styles.buttonTextPrimary
                         : variant === "secondary"
                             ? styles.buttonTextSecondary
-                            : styles.buttonTextGhost,
+                            : variant === "danger"
+                                ? styles.buttonTextDanger
+                                : styles.buttonTextGhost,
                 ]}
             >
                 {children}
@@ -418,12 +427,16 @@ const styles = StyleSheet.create({
     sectionTitle: { ...typography.heading, fontSize: 18 },
 
     button: { alignItems: "center", justifyContent: "center", minHeight: 48, borderRadius: radius.md, paddingHorizontal: spacing.xl },
+    button_sm: { minHeight: 36, paddingHorizontal: spacing.md, borderRadius: radius.sm },
     button_primary: { backgroundColor: colors.primary, ...shadow },
     button_secondary: { backgroundColor: "transparent", borderColor: colors.ink, borderWidth: 1.5 },
     button_ghost: { backgroundColor: "transparent" },
+    button_danger: { backgroundColor: colors.red },
     buttonText: { fontFamily: typography.body.fontFamily, fontSize: 15, fontWeight: "600", letterSpacing: 0.1 },
+    buttonText_sm: { fontSize: 13 },
     buttonTextPrimary: { color: colors.white },
     buttonTextSecondary: { color: colors.ink },
+    buttonTextDanger: { color: colors.white },
     buttonTextGhost: { color: colors.primary },
     pressed: { opacity: 0.8, transform: [{ scale: 0.985 }] },
     disabled: { opacity: 0.5 },

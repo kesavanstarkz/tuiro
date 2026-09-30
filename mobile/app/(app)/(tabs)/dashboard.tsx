@@ -234,14 +234,18 @@ export default function DashboardScreen() {
                             {data.pending_fee_items.length} student payment{data.pending_fee_items.length === 1 ? "" : "s"} need attention
                         </Text>
                         {data.pending_fee_items.slice(0, 3).map((fee) => (
-                            <View key={fee.id} style={styles.feeRow}>
+                            <Pressable
+                                key={fee.id}
+                                style={styles.feeRow}
+                                onPress={() => router.push(`/fees/${fee.id}` as never)}
+                            >
                                 <Avatar name={fee.student_name} size={34} />
                                 <View style={styles.feeInfo}>
                                     <Text style={styles.feeName}>{fee.student_name}</Text>
                                     <Text style={styles.feeDue}>Due {fee.due_date}</Text>
                                 </View>
                                 <Badge tone={fee.status === "OVERDUE" ? "danger" : "warning"}>{fee.status}</Badge>
-                            </View>
+                            </Pressable>
                         ))}
                     </Card>
                 ) : (

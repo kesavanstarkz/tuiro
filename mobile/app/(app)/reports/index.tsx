@@ -1,20 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { reportsApi } from "@/api/reports";
-import { useDashboard } from "@/api/hooks";
 import { Card, ErrorState, LoadingState, PageHeader, Screen, SectionHeader } from "@/components";
 import { colors, spacing, typography } from "@/theme";
-import { formatMoney } from "@/utils";
 
 type FeeReport = { collected_amount: string | number; pending_amount: string | number; payment_count: number };
 type AttendanceReport = { total_records: number; present_records: number; attendance_percentage: number };
-
+const money = (value: string | number) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(Number(value) || 0);
 export default function ReportsScreen() {
-    const fees = useQuery({ queryKey: ["report-fees"], queryFn: reportsApi.fees });
-    const attendance = useQuery({ queryKey: ["report-attendance"], queryFn: reportsApi.attendance });
-    const dashboard = useDashboard();
-    const currency = dashboard.data?.currency_code || "INR";
-    const money = (value: string | number) => formatMoney(value, currency);
+    const fees = useQuery({ queryKey: ["report-fees"], queryFn: reportsApi.fees }); const attendance = useQuery({ queryKey: ["report-attendance"], queryFn: reportsApi.attendance });
     if (fees.isLoading || attendance.isLoading) return <Screen><LoadingState /></Screen>;
     if (fees.isError || attendance.isError) return <Screen><ErrorState onRetry={() => { void fees.refetch(); void attendance.refetch(); }} /></Screen>;
     const finance = fees.data as FeeReport; const roll = attendance.data as AttendanceReport;

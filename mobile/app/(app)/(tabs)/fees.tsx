@@ -3,10 +3,9 @@ import { FlatList, StyleSheet, Text, View } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { router } from "expo-router";
 
-import { useDashboard, useGroupFeeAttention } from "@/api/hooks";
+import { useGroupFeeAttention } from "@/api/hooks";
 import { Avatar, Badge, EmptyState, ErrorState, IconButton, LoadingState, PageHeader, Screen } from "@/components";
 import { colors, radius, spacing, typography } from "@/theme";
-import { formatMoney } from "@/utils";
 
 const tone: Record<string, "success" | "warning" | "danger" | "neutral"> = {
     PAID: "success",
@@ -15,11 +14,13 @@ const tone: Record<string, "success" | "warning" | "danger" | "neutral"> = {
     PENDING: "warning",
 };
 
+const money = (value: string | number) =>
+    new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(
+        Number(value) || 0
+    );
+
 export default function FeesScreen() {
     const query = useGroupFeeAttention();
-    const dashboard = useDashboard();
-    const currency = dashboard.data?.currency_code || "INR";
-    const money = (value: string | number) => formatMoney(value, currency);
 
     const rawFees = query.data ?? [];
     const sortedFees = useMemo(() => {

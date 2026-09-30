@@ -44,6 +44,7 @@ export default function TestsScreen() {
                 { key: "test_date", label: "Test date (YYYY-MM-DD)", required: true },
                 { key: "maximum_marks", label: "Maximum marks", required: true, keyboardType: "decimal-pad" },
             ]}
+            detailHref={(item) => `/tests/${item.id}`}
         />
     );
 }
