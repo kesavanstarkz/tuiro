@@ -145,3 +145,94 @@ def test_i2_dashboard_and_reports_include_group_attendance(client: TestClient = 
     assert rep_res_dedup.json()["total_records"] == 1
     assert rep_res_dedup.json()["present_records"] == 1
 
+
+def test_i3_group_fees_create_payments_receipts_and_dashboard_totals(client: TestClient = None):
+    c = client or TestClient(app)
+    email = f"i3-{uuid4().hex}@example.com"
+    reg = c.post("/api/v1/auth/register", json={
+        "email": email,
+        "password": "password123",
+        "display_name": "I3 Owner",
+        "organization_name": "I3 Fee Org",
+    })
+    assert reg.status_code == 201, reg.text
+    token = reg.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # 1. Create a group and student
+    grp_res = c.post("/api/v1/groups", json={"name": "Math Grade 10"}, headers=headers)
+    assert grp_res.status_code == 201
+    group_id = grp_res.json()["id"]
+
+    stud_res = c.post("/api/v1/students", json={
+        "student_number": "STU-003",
+        "first_name": "Charlie",
+        "last_name": "Brown",
+    }, headers=headers)
+    assert stud_res.status_code == 201
+    student_id = stud_res.json()["id"]
+
+    add_mem = c.post(f"/api/v1/groups/{group_id}/members/{student_id}", headers=headers)
+    assert add_mem.status_code == 201
+
+    # 2. Create a group fee
+    fee_res = c.post("/api/v1/groups/fees", json={
+        "group_id": group_id,
+        "amount": 250.0,
+        "due_date": "2026-11-01",
+    }, headers=headers)
+    assert fee_res.status_code == 201
+    fee_id = fee_res.json()["id"]
+
+    # 3. Check dashboard before payment
+    dash_before = c.get("/api/v1/dashboard", headers=headers)
+    assert dash_before.status_code == 200
+    assert float(dash_before.json()["pending_fees"]) == 250.0
+    assert float(dash_before.json()["todays_collections"]) == 0.0
+
+    # 4. Check /fees/pending
+    pending_res = c.get("/api/v1/fees/pending", headers=headers)
+    assert pending_res.status_code == 200
+    assert any(float(item["outstanding_amount"]) == 250.0 for item in pending_res.json())
+
+    # 5. Pay the fee via /groups/fees/{fee_id}/payments
+    pay_res = c.post(f"/api/v1/groups/fees/{fee_id}/payments", json={
+        "student_id": student_id,
+        "amount_paid": 250.0,
+    }, headers=headers)
+    assert pay_res.status_code == 201
+
+    # 6. Check dashboard after payment
+    dash_after = c.get("/api/v1/dashboard", headers=headers)
+    assert dash_after.status_code == 200
+    assert float(dash_after.json()["pending_fees"]) == 0.0
+    assert float(dash_after.json()["todays_collections"]) == 250.0
+    assert len(dash_after.json()["recent_payments"]) >= 1
+
+    # 7. Check /reports/fees
+    rep_fees = c.get("/api/v1/reports/fees", headers=headers)
+    assert rep_fees.status_code == 200
+    assert float(rep_fees.json()["collected_amount"]) == 250.0
+    assert float(rep_fees.json()["pending_amount"]) == 0.0
+    assert rep_fees.json()["payment_count"] == 1
+
+    # 8. Check receipts
+    receipts_res = c.get("/api/v1/receipts", headers=headers)
+    assert receipts_res.status_code == 200
+    assert len(receipts_res.json()) == 1
+    assert receipts_res.json()[0]["receipt_number"].startswith("TUIRO-")
+
+    # 9. Check student merged view
+    view_res = c.get(f"/api/v1/groups/students/{student_id}/view", headers=headers)
+    assert view_res.status_code == 200
+    student_fees = view_res.json()["fees"]
+    matching_fee = next((f for f in student_fees if f["id"] == fee_id), None)
+    assert matching_fee is not None
+    assert matching_fee["status"] == "PAID"
+
+    # 10. Check /groups/fees/needs-attention (should not include settled fee)
+    attn_res = c.get("/api/v1/groups/fees/needs-attention", headers=headers)
+    assert attn_res.status_code == 200
+    assert not any(f["fee_id"] == fee_id and f["student_id"] == student_id for f in attn_res.json())
+
+
