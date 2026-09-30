@@ -38,7 +38,7 @@ class Organization(Base):
     name: Mapped[str] = mapped_column(String(200))
     country_code: Mapped[str] = mapped_column(String(2), default="XX")
     currency_code: Mapped[str] = mapped_column(String(3), default="USD")
-    timezone: Mapped[str] = mapped_column(String(80), default="UTC")
+    timezone: Mapped[str] = mapped_column(String(80), default="Asia/Kolkata")
     locale: Mapped[str] = mapped_column(String(20), default="en")
     settings: Mapped[str] = mapped_column(Text, default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

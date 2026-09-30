@@ -5,6 +5,7 @@ import { useDashboard, useGroups } from "@/api/hooks";
 import { Avatar, Badge, Card, EmptyState, ErrorState, IconButton, LoadingState, Screen, SectionHeader } from "@/components";
 import { useAuthStore } from "@/store/auth";
 import { colors, radius, spacing, typography } from "@/theme";
+import { formatOrgDate } from "@/utils/datetime";
 
 type Dashboard = {
     students: number;
@@ -12,6 +13,7 @@ type Dashboard = {
     attendance_percentage: number;
     pending_fees: string | number;
     currency_code: string;
+    timezone?: string;
     next_class: {
         class_id?: string;
         class_name: string;
@@ -55,7 +57,7 @@ export default function DashboardScreen() {
     const data = query.data as Dashboard;
     const hasClasses = (groups.data?.length ?? 0) > 0;
     const firstName = user?.display_name?.split(" ")[0] ?? "there";
-    const date = new Intl.DateTimeFormat(undefined, { weekday: "long", month: "short", day: "numeric" }).format(new Date());
+    const date = formatOrgDate(data?.timezone);
     const progress = Math.min(100, Math.max(0, Math.round(data.attendance_percentage || 0)));
 
     const handleAttendancePress = () => {

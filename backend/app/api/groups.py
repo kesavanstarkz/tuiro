@@ -18,9 +18,10 @@ from sqlalchemy.orm import Session
 
 from app.core.dependencies import Principal, require_authenticated_user, require_roles
 from app.core.permissions import check_teacher_class_access
+from app.core.timezone import get_org_today
 from app.core.errors import TuiroError
 from app.db import get_db
-from app.models import Assignment, AuditLog, ChatMessage, ChatParticipant, ChatThread, ClassGroup, ClassStudent, FeePayment, Group, GroupAttendanceRecord, GroupAttendanceSession, GroupFee, GroupMember, GroupSchedule, OrganizationMember, Parent, Payment, Receipt, Student, StudentFee, StudentParent, User
+from app.models import Assignment, AuditLog, ChatMessage, ChatParticipant, ChatThread, ClassGroup, ClassStudent, FeePayment, Group, GroupAttendanceRecord, GroupAttendanceSession, GroupFee, GroupMember, GroupSchedule, Organization, OrganizationMember, Parent, Payment, Receipt, Student, StudentFee, StudentParent, User
 from app.services.receipts import generate_receipt_number
 
 router = APIRouter(prefix="/groups", tags=["groups"])
@@ -197,6 +198,8 @@ def add_member(group_id: UUID, student_id: UUID, principal: Principal = Depends(
     # Sync existing group fees to this student
     fees = db.scalars(select(GroupFee).where(GroupFee.organization_id == principal.organization_id, GroupFee.group_id == group_id)).all()
     for gf in fees:
+        org = db.get(Organization, principal.organization_id)
+        org_today = get_org_today(org)
         bp = f"GF-{gf.id.hex[:24]}"
         existing = db.scalar(select(StudentFee).where(StudentFee.organization_id == principal.organization_id, StudentFee.student_id == student_id, StudentFee.billing_period == bp))
         if not existing:
@@ -207,7 +210,7 @@ def add_member(group_id: UUID, student_id: UUID, principal: Principal = Depends(
                 amount=gf.amount,
                 amount_due=gf.amount,
                 due_date=gf.due_date,
-                status="PENDING" if gf.due_date >= date.today() else "OVERDUE",
+                status="PENDING" if gf.due_date >= org_today else "OVERDUE",
             ))
     db.commit(); db.refresh(member); return member
 
@@ -292,6 +295,8 @@ def delete_assignment(assignment_id: UUID, principal: Principal = Depends(requir
 
 
 def _sync_group_fee_to_student_fees(db: Session, org_id: UUID, group_fee: GroupFee):
+    org = db.get(Organization, org_id)
+    org_today = get_org_today(org)
     student_ids = [group_fee.student_id] if group_fee.student_id else list(db.scalars(select(GroupMember.student_id).where(GroupMember.group_id == group_fee.group_id, GroupMember.removed_at.is_(None))))
     bp = f"GF-{group_fee.id.hex[:24]}"
     for sid in student_ids:
@@ -304,7 +309,7 @@ def _sync_group_fee_to_student_fees(db: Session, org_id: UUID, group_fee: GroupF
                 amount=group_fee.amount,
                 amount_due=group_fee.amount,
                 due_date=group_fee.due_date,
-                status="PENDING" if group_fee.due_date >= date.today() else "OVERDUE",
+                status="PENDING" if group_fee.due_date >= org_today else "OVERDUE",
             )
             db.add(sf)
 
@@ -322,13 +327,16 @@ def create_fee(request: FeeInput, principal: Principal = Depends(require_roles(*
     return item
 
 
-def _fee_status(fee: GroupFee, payment: FeePayment | None) -> str:
+def _fee_status(fee: GroupFee, payment: FeePayment | None, org_today: date | None = None) -> str:
     if payment and payment.amount_paid >= fee.amount:
         return "PAID"
-    return "OVERDUE" if fee.due_date < date.today() else "PENDING"
+    today_val = org_today if org_today is not None else date.today()
+    return "OVERDUE" if fee.due_date < today_val else "PENDING"
 
 
 def _fee_rows(db: Session, org: UUID):
+    org_rec = db.get(Organization, org)
+    org_today = get_org_today(org_rec)
     fees = db.scalars(select(GroupFee).where(GroupFee.organization_id == org)).all()
     rows = []
     for fee in fees:
@@ -336,7 +344,7 @@ def _fee_rows(db: Session, org: UUID):
         for student_id in student_ids:
             payment = db.scalar(select(FeePayment).where(FeePayment.fee_id == fee.id, FeePayment.student_id == student_id))
             student = db.get(Student, student_id)
-            status = _fee_status(fee, payment)
+            status = _fee_status(fee, payment, org_today)
             rows.append({"fee_id": fee.id, "student_id": student_id, "student_name": f"{student.first_name} {student.last_name}".strip() if student else "Student", "group_id": fee.group_id, "amount": fee.amount, "amount_paid": payment.amount_paid if payment else Decimal("0"), "outstanding_amount": max(Decimal("0"), fee.amount - (payment.amount_paid if payment else 0)), "due_date": fee.due_date, "status": status, "source": "Group" if fee.group_id else "Individual"})
     return rows
 
@@ -356,6 +364,9 @@ def pay_group_fee(fee_id: UUID, request: FeePaymentInput, principal: Principal =
     if fee.group_id and not _active_member(db, principal.organization_id, fee.group_id, request.student_id):
         raise TuiroError("FEE_NOT_APPLICABLE", "This group fee does not apply to this student.", 409)
 
+    org = db.get(Organization, principal.organization_id)
+    org_today = get_org_today(org)
+
     # 1. Ensure matching StudentFee exists
     bp = f"GF-{fee.id.hex[:24]}"
     student_fee = db.scalar(select(StudentFee).where(StudentFee.organization_id == principal.organization_id, StudentFee.student_id == request.student_id, StudentFee.billing_period == bp).with_for_update())
@@ -367,7 +378,7 @@ def pay_group_fee(fee_id: UUID, request: FeePaymentInput, principal: Principal =
             amount=fee.amount,
             amount_due=fee.amount,
             due_date=fee.due_date,
-            status="PENDING" if fee.due_date >= date.today() else "OVERDUE",
+            status="PENDING" if fee.due_date >= org_today else "OVERDUE",
         )
         db.add(student_fee)
         db.flush()
@@ -385,8 +396,8 @@ def pay_group_fee(fee_id: UUID, request: FeePaymentInput, principal: Principal =
         raise TuiroError("PAYMENT_EXCEEDS_BALANCE", "Payment is greater than the outstanding balance.", 400)
 
     payment.amount_paid = current_paid + request.amount_paid
-    payment.paid_on = request.paid_on or date.today()
-    payment.status = _fee_status(fee, payment)
+    payment.paid_on = request.paid_on or org_today
+    payment.status = _fee_status(fee, payment, org_today)
 
     # 3. Create real Payment
     real_payment = Payment(
@@ -394,7 +405,7 @@ def pay_group_fee(fee_id: UUID, request: FeePaymentInput, principal: Principal =
         fee_id=student_fee.id,
         student_id=request.student_id,
         amount=request.amount_paid,
-        payment_date=request.paid_on or date.today(),
+        payment_date=request.paid_on or org_today,
         payment_method="CASH",
         notes=f"Group fee payment for {fee_id}",
         recorded_by=principal.user.id,
@@ -409,7 +420,7 @@ def pay_group_fee(fee_id: UUID, request: FeePaymentInput, principal: Principal =
     elif total_sf_paid > 0:
         student_fee.status = "PARTIAL"
     else:
-        student_fee.status = "OVERDUE" if student_fee.due_date < date.today() else "PENDING"
+        student_fee.status = "OVERDUE" if student_fee.due_date < org_today else "PENDING"
 
     # 5. Update GroupFee status if applicable
     if fee.student_id:
@@ -473,6 +484,8 @@ def student_group_attendance(student_id: UUID, principal: Principal = Depends(re
 
 
 def _merged(db: Session, org: UUID, student_id: UUID):
+    org_rec = db.get(Organization, org)
+    org_today = get_org_today(org_rec)
     group_ids = list(db.scalars(select(GroupMember.group_id).where(GroupMember.organization_id == org, GroupMember.student_id == student_id, GroupMember.removed_at.is_(None))))
     assignments = list(db.scalars(select(Assignment).where(Assignment.organization_id == org, (Assignment.student_id == student_id) | (Assignment.group_id.in_(group_ids) if group_ids else False))))
     fees = list(db.scalars(select(GroupFee).where(GroupFee.organization_id == org, (GroupFee.student_id == student_id) | (GroupFee.group_id.in_(group_ids) if group_ids else False))))
@@ -483,7 +496,7 @@ def _merged(db: Session, org: UUID, student_id: UUID):
         if f.id in fee_overrides and f.group_id:
             continue
         fp = db.scalar(select(FeePayment).where(FeePayment.fee_id == f.id, FeePayment.student_id == student_id))
-        st = _fee_status(f, fp)
+        st = _fee_status(f, fp, org_today)
         fee_items.append({
             "id": f.id,
             "amount": f.amount,

@@ -854,6 +854,128 @@ def test_i12_secret_safeguards():
     assert prod_settings.jwt_secret == "super-secure-production-secret-12345"
 
 
+def test_i13_timezone_handling_around_midnight(client: TestClient = None):
+    from datetime import datetime, timezone as dt_timezone
+    from unittest.mock import patch
+    from uuid import uuid4
+    from zoneinfo import ZoneInfo
+    from app.core.timezone import get_org_now, get_org_today, get_org_timezone
+    from app.db import SessionLocal
+    from app.models import ClassGroup, Organization, OrganizationMember, ScheduleEntry, User
+    from app.core.security import create_access_token, hash_password
+
+    c = client or TestClient(app)
+    db = SessionLocal()
+
+    # 1. Organization defaults to Asia/Kolkata
+    org_kolkata = Organization(
+        name=f"Kolkata Center {uuid4().hex[:6]}",
+        timezone="Asia/Kolkata",
+        currency_code="INR",
+    )
+    db.add(org_kolkata)
+    db.flush()
+
+    user = User(
+        email=f"owner-tz-{uuid4().hex}@example.com",
+        display_name="Tz Owner",
+        password_hash=hash_password("Password123!"),
+    )
+    db.add(user)
+    db.flush()
+
+    member = OrganizationMember(organization_id=org_kolkata.id, user_id=user.id, role="OWNER")
+    db.add(member)
+    db.flush()
+
+    token = create_access_token(user_id=str(user.id), organization_id=str(org_kolkata.id), role="OWNER")
+
+    # Class and Schedules:
+    # 2026-09-30 was Wednesday (weekday 2)
+    # 2026-10-01 was Thursday (weekday 3)
+    cls = ClassGroup(organization_id=org_kolkata.id, name="Maths Batch")
+    db.add(cls)
+    db.flush()
+
+    # Schedule for Wednesday (weekday 2)
+    sched_wed = ScheduleEntry(
+        organization_id=org_kolkata.id,
+        class_id=cls.id,
+        day_of_week=2,
+        start_time="20:30",
+        end_time="21:30",
+    )
+    # Schedule for Thursday (weekday 3) at 02:00
+    sched_thu = ScheduleEntry(
+        organization_id=org_kolkata.id,
+        class_id=cls.id,
+        day_of_week=3,
+        start_time="02:00",
+        end_time="03:00",
+    )
+    db.add_all([sched_wed, sched_thu])
+    db.commit()
+
+    # Freeze time at 2026-09-30 20:00:00 UTC
+    # In Asia/Kolkata (+5:30), this is 2026-10-01 01:30:00 (Thursday)
+    frozen_utc = datetime(2026, 9, 30, 20, 0, 0, tzinfo=dt_timezone.utc)
+
+    class MockDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            if tz is not None:
+                return frozen_utc.astimezone(tz)
+            return frozen_utc.astimezone(ZoneInfo("Asia/Kolkata"))
+
+    with patch("app.core.timezone.datetime", MockDatetime), \
+         patch("app.api.workflows.datetime", MockDatetime):
+        today_kolkata = get_org_today(org_kolkata)
+        assert today_kolkata.day == 1
+        assert today_kolkata.month == 10
+        assert today_kolkata.year == 2026
+
+        now_kolkata = get_org_now(org_kolkata)
+        assert now_kolkata.strftime("%H:%M") == "01:30"
+
+        # Check dashboard computes today and next class based on Asia/Kolkata
+        res = c.get("/api/v1/dashboard", headers={"Authorization": f"Bearer {token}"})
+        assert res.status_code == 200
+        data = res.json()
+        assert data["timezone"] == "Asia/Kolkata"
+        # Since it is Thursday (weekday 3) in Kolkata, classes_today must be 1 (the Thursday class)
+        assert data["classes_today"] == 1
+        assert data["next_class"] is not None
+        assert data["next_class"]["start_time"] == "02:00"
+
+    # Also test America/New_York (UTC-4) at 2026-10-01 02:00:00 UTC
+    # In New York, this is 2026-09-30 22:00:00 (Wednesday)
+    org_ny = Organization(name="NY Center", timezone="America/New_York")
+    frozen_utc_ny = datetime(2026, 10, 1, 2, 0, 0, tzinfo=dt_timezone.utc)
+
+    class MockDatetimeNY(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            if tz is not None:
+                return frozen_utc_ny.astimezone(tz)
+            return frozen_utc_ny.astimezone(ZoneInfo("America/New_York"))
+
+    with patch("app.core.timezone.datetime", MockDatetimeNY):
+        today_ny = get_org_today(org_ny)
+        assert today_ny.day == 30
+        assert today_ny.month == 9
+
+    # Update timezone via PATCH /settings
+    patch_res = c.patch(
+        "/api/v1/settings",
+        json={"timezone": "Asia/Dubai"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert patch_res.status_code == 200
+    assert patch_res.json()["timezone"] == "Asia/Dubai"
+    db.close()
+
+
+
 
 
 

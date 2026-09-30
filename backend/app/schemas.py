@@ -27,7 +27,7 @@ class RegisterRequest(BaseModel):
     organization_name: str = Field(min_length=1, max_length=200)
     country_code: str = Field(default="XX", min_length=2, max_length=2)
     currency_code: str = Field(default="USD", min_length=3, max_length=3)
-    timezone: str = "UTC"
+    timezone: str = "Asia/Kolkata"
 
 
 class LoginRequest(BaseModel):

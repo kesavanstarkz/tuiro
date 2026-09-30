@@ -22,6 +22,7 @@ from app.core.permissions import (
     get_parent_student_ids,
     get_student_self_id,
 )
+from app.core.timezone import get_org_now, get_org_today
 from app.db import get_db
 from app.models import AcademicTest, AttendanceRecord, AttendanceSession, AuditLog, ClassGroup, ClassStudent, ClassTeacher, GroupAttendanceRecord, GroupAttendanceSession, GroupMember, Homework, Notification, Organization, Payment, Receipt, ScheduleEntry, Student, StudentFee, StudentParent, Parent, Teacher, TestMark
 from app.services.receipts import build_receipt_pdf, generate_receipt_number
@@ -144,10 +145,13 @@ def _student_name(db: Session, student_id: UUID) -> str:
     return f"{student.first_name} {student.last_name}".strip() if student else "Student"
 
 
-def _fee_payload(db: Session, fee: StudentFee) -> dict:
+def _fee_payload(db: Session, fee: StudentFee, org_today: date | None = None) -> dict:
+    if org_today is None:
+        org = db.get(Organization, fee.organization_id)
+        org_today = get_org_today(org)
     paid = db.scalar(select(func.coalesce(func.sum(Payment.amount), 0)).where(Payment.fee_id == fee.id)) or Decimal("0")
     outstanding = max(Decimal("0"), fee.amount_due - paid)
-    status = "PAID" if outstanding == 0 else "PARTIAL" if paid else ("OVERDUE" if fee.due_date < date.today() else "PENDING")
+    status = "PAID" if outstanding == 0 else "PARTIAL" if paid else ("OVERDUE" if fee.due_date < org_today else "PENDING")
     if fee.status != status:
         fee.status = status
     return {"id": fee.id, "student_id": fee.student_id, "student_name": _student_name(db, fee.student_id), "billing_period": fee.billing_period, "amount": fee.amount, "amount_due": fee.amount_due, "paid_amount": paid, "outstanding_amount": outstanding, "due_date": fee.due_date, "status": status}
@@ -540,11 +544,9 @@ def _attendance_summary(db: Session, org_id: UUID, target_date: date | None = No
 
 @router.get("/dashboard")
 def dashboard(principal: Principal = Depends(require_roles("OWNER", "ADMIN")), db: Session = Depends(get_db)):
-    from datetime import datetime
-
     organization = db.get(Organization, principal.organization_id)
     students = db.scalar(select(func.count()).select_from(Student).where(Student.organization_id == principal.organization_id, Student.status == "ACTIVE")) or 0
-    today = date.today()
+    today = get_org_today(organization)
     classes = db.scalar(select(func.count()).select_from(ClassGroup).where(ClassGroup.organization_id == principal.organization_id, ClassGroup.status == "ACTIVE")) or 0
     today_schedules = db.scalars(select(ScheduleEntry).where(ScheduleEntry.organization_id == principal.organization_id, ScheduleEntry.day_of_week == today.weekday()).order_by(ScheduleEntry.start_time)).all()
     classes_today = len(today_schedules)
@@ -553,20 +555,20 @@ def dashboard(principal: Principal = Depends(require_roles("OWNER", "ADMIN")), d
     pending_items = []
     pending_total = Decimal("0")
     for fee in pending_fees:
-        fee_item = _fee_payload(db, fee)
+        fee_item = _fee_payload(db, fee, org_today=today)
         if fee_item["status"] == "PAID":
             continue
         remaining = fee_item["outstanding_amount"]
         pending_total += remaining
         if len(pending_items) < 5:
             pending_items.append({"id": fee.id, "student_name": fee_item["student_name"], "billing_period": fee.billing_period, "amount": remaining, "due_date": fee.due_date, "status": fee_item["status"]})
-    collected = db.scalar(select(func.coalesce(func.sum(Payment.amount), 0)).where(Payment.organization_id == principal.organization_id, Payment.payment_date == date.today())) or Decimal("0")
+    collected = db.scalar(select(func.coalesce(func.sum(Payment.amount), 0)).where(Payment.organization_id == principal.organization_id, Payment.payment_date == today)) or Decimal("0")
     recent_payments = db.scalars(select(Payment).where(Payment.organization_id == principal.organization_id).order_by(Payment.created_at.desc()).limit(5)).all()
     recent_items = []
     for payment in recent_payments:
         recent_items.append(_payment_payload(db, payment))
     next_class = None
-    current_time = datetime.now().strftime("%H:%M")
+    current_time = get_org_now(organization).strftime("%H:%M")
     for entry in today_schedules:
         if entry.start_time >= current_time:
             class_group = db.get(ClassGroup, entry.class_id)
@@ -574,7 +576,7 @@ def dashboard(principal: Principal = Depends(require_roles("OWNER", "ADMIN")), d
             student_count = db.scalar(select(func.count()).select_from(ClassStudent).where(ClassStudent.organization_id == principal.organization_id, ClassStudent.class_id == entry.class_id)) or 0
             next_class = {"class_name": class_group.name if class_group else "Class", "subject": class_group.subject if class_group else None, "teacher_name": teacher.employee_number if teacher else None, "start_time": entry.start_time, "end_time": entry.end_time, "room": entry.room, "student_count": student_count}
             break
-    return {"students": students, "active_classes": classes, "classes_today": classes_today, "attendance_percentage": round((attendance_present / attendance_total) * 100, 2) if attendance_total else 0, "pending_fees": pending_total, "todays_collections": collected, "next_class": next_class, "pending_fee_items": pending_items, "recent_payments": recent_items, "currency_code": organization.currency_code if organization else "USD", "role": principal.role}
+    return {"students": students, "active_classes": classes, "classes_today": classes_today, "attendance_percentage": round((attendance_present / attendance_total) * 100, 2) if attendance_total else 0, "pending_fees": pending_total, "todays_collections": collected, "next_class": next_class, "pending_fee_items": pending_items, "recent_payments": recent_items, "currency_code": organization.currency_code if organization else "USD", "timezone": organization.timezone if organization else "Asia/Kolkata", "role": principal.role}
 
 
 @router.post("/classes/{class_id}/students", status_code=201)
