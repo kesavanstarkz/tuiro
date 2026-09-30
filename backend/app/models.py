@@ -441,3 +441,13 @@ class Notification(Base):
     failure_reason: Mapped[Optional[str]] = mapped_column(Text)
     sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class OrganizationReceiptCounter(Base):
+    __tablename__ = "organization_receipt_counters"
+    __table_args__ = (UniqueConstraint("organization_id", "year", name="uq_org_receipt_counter_year"),)
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    organization_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    year: Mapped[int] = mapped_column(Integer)
+    last_number: Mapped[int] = mapped_column(Integer, default=0)
+

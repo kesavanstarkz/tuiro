@@ -18,3 +18,44 @@ def build_receipt_pdf(organization, receipt, payment, fee, student) -> bytes:
     story.extend([table, Spacer(1, 14 * mm), Paragraph("Thank you", styles["Normal"])])
     document.build(story)
     return buffer.getvalue()
+
+
+def generate_receipt_number(db, organization_id, max_retries: int = 5) -> str:
+    from datetime import datetime, timezone
+    from sqlalchemy import func, select
+    from app.models import OrganizationReceiptCounter, Receipt
+
+    current_year = datetime.now(timezone.utc).year
+    for attempt in range(max_retries):
+        try:
+            counter = db.scalar(
+                select(OrganizationReceiptCounter)
+                .where(
+                    OrganizationReceiptCounter.organization_id == organization_id,
+                    OrganizationReceiptCounter.year == current_year,
+                )
+                .with_for_update()
+            )
+            if counter is None:
+                existing_count = db.scalar(
+                    select(func.count())
+                    .select_from(Receipt)
+                    .where(Receipt.organization_id == organization_id)
+                ) or 0
+                counter = OrganizationReceiptCounter(
+                    organization_id=organization_id,
+                    year=current_year,
+                    last_number=existing_count + 1,
+                )
+                db.add(counter)
+                db.flush()
+                next_val = counter.last_number
+            else:
+                counter.last_number += 1
+                db.flush()
+                next_val = counter.last_number
+
+            return f"TUIRO-{current_year}-{next_val:06d}"
+        except Exception:
+            if attempt == max_retries - 1:
+                raise

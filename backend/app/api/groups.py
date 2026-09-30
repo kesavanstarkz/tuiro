@@ -20,6 +20,7 @@ from app.core.dependencies import Principal, require_authenticated_user, require
 from app.core.errors import TuiroError
 from app.db import get_db
 from app.models import Assignment, AuditLog, ChatMessage, ChatParticipant, ChatThread, ClassGroup, ClassStudent, FeePayment, Group, GroupAttendanceRecord, GroupAttendanceSession, GroupFee, GroupMember, GroupSchedule, OrganizationMember, Parent, Payment, Receipt, Student, StudentFee, StudentParent, User
+from app.services.receipts import generate_receipt_number
 
 router = APIRouter(prefix="/groups", tags=["groups"])
 EDITORS = ("OWNER", "ADMIN", "TEACHER")
@@ -341,14 +342,16 @@ def group_fee_needs_attention(principal: Principal = Depends(require_authenticat
 
 @router.post("/fees/{fee_id:uuid}/payments", status_code=201)
 def pay_group_fee(fee_id: UUID, request: FeePaymentInput, principal: Principal = Depends(require_roles(*EDITORS)), db: Session = Depends(get_db)):
-    fee = _record(db, GroupFee, principal.organization_id, fee_id)
+    fee = db.scalar(select(GroupFee).where(GroupFee.id == fee_id, GroupFee.organization_id == principal.organization_id).with_for_update())
+    if fee is None:
+        raise TuiroError("RESOURCE_NOT_FOUND", "The requested resource was not found.", 404)
     _record(db, Student, principal.organization_id, request.student_id)
     if fee.group_id and not _active_member(db, principal.organization_id, fee.group_id, request.student_id):
         raise TuiroError("FEE_NOT_APPLICABLE", "This group fee does not apply to this student.", 409)
 
     # 1. Ensure matching StudentFee exists
     bp = f"GF-{fee.id.hex[:24]}"
-    student_fee = db.scalar(select(StudentFee).where(StudentFee.organization_id == principal.organization_id, StudentFee.student_id == request.student_id, StudentFee.billing_period == bp))
+    student_fee = db.scalar(select(StudentFee).where(StudentFee.organization_id == principal.organization_id, StudentFee.student_id == request.student_id, StudentFee.billing_period == bp).with_for_update())
     if student_fee is None:
         student_fee = StudentFee(
             organization_id=principal.organization_id,
@@ -411,8 +414,7 @@ def pay_group_fee(fee_id: UUID, request: FeePaymentInput, principal: Principal =
             fee.status = "PAID"
 
     # 6. Create real Receipt
-    receipt_count = db.scalar(select(func.count()).select_from(Receipt).where(Receipt.organization_id == principal.organization_id)) or 0
-    receipt_number = f"TUIRO-{datetime.now(timezone.utc).year}-{receipt_count + 1:06d}"
+    receipt_number = generate_receipt_number(db, principal.organization_id)
     receipt = Receipt(
         organization_id=principal.organization_id,
         payment_id=real_payment.id,
@@ -516,12 +518,19 @@ def group_messages(group_id: UUID, principal: Principal = Depends(require_authen
     return [] if thread is None else db.scalars(select(ChatMessage).where(ChatMessage.thread_id == thread.id).order_by(ChatMessage.timestamp)).all()
 
 
-def _direct_thread(db: Session, org: UUID, first_user_id: UUID, second_user_id: UUID) -> ChatThread:
+def _find_direct_thread(db: Session, org: UUID, first_user_id: UUID, second_user_id: UUID) -> ChatThread | None:
     candidate_threads = db.scalars(select(ChatThread).join(ChatParticipant).where(ChatThread.organization_id == org, ChatThread.type == "DIRECT", ChatParticipant.user_id == first_user_id)).all()
     for thread in candidate_threads:
         participants = set(db.scalars(select(ChatParticipant.user_id).where(ChatParticipant.thread_id == thread.id)))
         if participants == {first_user_id, second_user_id}:
             return thread
+    return None
+
+
+def _direct_thread(db: Session, org: UUID, first_user_id: UUID, second_user_id: UUID) -> ChatThread:
+    thread = _find_direct_thread(db, org, first_user_id, second_user_id)
+    if thread:
+        return thread
     thread = ChatThread(organization_id=org, type="DIRECT")
     db.add(thread); db.flush()
     db.add_all([ChatParticipant(thread_id=thread.id, user_id=first_user_id), ChatParticipant(thread_id=thread.id, user_id=second_user_id)])
@@ -540,6 +549,10 @@ def post_direct_message(participant_id: UUID, request: MessageInput, principal: 
 
 @router.get("/chats/direct/{participant_id:uuid}")
 def direct_messages(participant_id: UUID, principal: Principal = Depends(require_roles(*EDITORS, "STUDENT")), db: Session = Depends(get_db)):
-    thread = _direct_thread(db, principal.organization_id, principal.user.id, participant_id)
-    db.commit()  # persist a newly opened thread even when it has no messages
+    participant = db.scalar(select(OrganizationMember).where(OrganizationMember.organization_id == principal.organization_id, OrganizationMember.user_id == participant_id))
+    if participant_id == principal.user.id or participant is None or participant.role not in {*EDITORS, "STUDENT"}:
+        raise TuiroError("RESOURCE_NOT_FOUND", "The requested participant was not found.", 404)
+    thread = _find_direct_thread(db, principal.organization_id, principal.user.id, participant_id)
+    if thread is None:
+        return []
     return db.scalars(select(ChatMessage).where(ChatMessage.thread_id == thread.id).order_by(ChatMessage.timestamp)).all()

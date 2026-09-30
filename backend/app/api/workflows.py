@@ -17,7 +17,7 @@ from app.core.dependencies import Principal, require_authenticated_user, require
 from app.core.errors import TuiroError
 from app.db import get_db
 from app.models import AcademicTest, AttendanceRecord, AttendanceSession, AuditLog, ClassGroup, ClassStudent, ClassTeacher, GroupAttendanceRecord, GroupAttendanceSession, GroupMember, Homework, Notification, Organization, Payment, Receipt, ScheduleEntry, Student, StudentFee, StudentParent, Parent, Teacher, TestMark
-from app.services.receipts import build_receipt_pdf
+from app.services.receipts import build_receipt_pdf, generate_receipt_number
 
 router = APIRouter()
 
@@ -201,7 +201,6 @@ def list_fees(status_filter: str | None = Query(None, alias="status"), principal
         query = query.where(StudentFee.status == status_filter)
     fees = db.scalars(query.limit(200)).all()
     payload = [_fee_payload(db, fee) for fee in fees]
-    db.commit()
     return [item for item in payload if not status_filter or item["status"] == status_filter]
 
 
@@ -209,13 +208,18 @@ def list_fees(status_filter: str | None = Query(None, alias="status"), principal
 def pending_fees(principal: Principal = Depends(require_authenticated_user), db: Session = Depends(get_db)):
     fees = db.scalars(select(StudentFee).where(StudentFee.organization_id == principal.organization_id).order_by(StudentFee.due_date)).all()
     payload = [_fee_payload(db, fee) for fee in fees]
-    db.commit()
     return [item for item in payload if item["status"] in {"PENDING", "PARTIAL", "OVERDUE"}]
 
 
 @router.post("/payments", status_code=201)
 def record_payment(request: PaymentInput, principal: Principal = Depends(require_roles("OWNER", "ADMIN")), db: Session = Depends(get_db)):
-    fee = _org_record(db, StudentFee, principal.organization_id, request.fee_id)
+    fee = db.scalar(
+        select(StudentFee)
+        .where(StudentFee.id == request.fee_id, StudentFee.organization_id == principal.organization_id)
+        .with_for_update()
+    )
+    if fee is None:
+        raise TuiroError("RESOURCE_NOT_FOUND", "The requested resource was not found.", 404)
     if request.transaction_reference and db.scalar(select(Payment).where(Payment.organization_id == principal.organization_id, Payment.transaction_reference == request.transaction_reference)):
         raise TuiroError("DUPLICATE_PAYMENT", "This transaction reference has already been recorded.", 409)
     paid = db.scalar(select(func.coalesce(func.sum(Payment.amount), 0)).where(Payment.fee_id == fee.id)) or Decimal("0")
@@ -227,7 +231,7 @@ def record_payment(request: PaymentInput, principal: Principal = Depends(require
     db.flush()
     new_paid = paid + request.amount
     fee.status = "PAID" if new_paid == fee.amount_due else "PARTIAL"
-    receipt_number = f"TUIRO-{datetime.now(timezone.utc).year}-{db.query(Receipt).filter(Receipt.organization_id == principal.organization_id).count() + 1:06d}"
+    receipt_number = generate_receipt_number(db, principal.organization_id)
     receipt = Receipt(organization_id=principal.organization_id, payment_id=payment.id, receipt_number=receipt_number)
     db.add(receipt)
     db.add(AuditLog(organization_id=principal.organization_id, user_id=principal.user.id, action="payment_created", entity_type="payment", entity_id=payment.id))

@@ -310,4 +310,65 @@ def test_i5_transaction_reference_unique_per_org(client: TestClient = None):
     assert pay2.status_code == 201, pay2.text
 
 
+def test_i7_concurrency_and_side_effects(client: TestClient = None):
+    c = client or TestClient(app)
+    email = f"i7-{uuid4().hex}@example.com"
+    reg = c.post("/api/v1/auth/register", json={
+        "email": email,
+        "password": "password123",
+        "display_name": "I7 Owner",
+        "organization_name": "I7 Concurrency Org",
+    })
+    assert reg.status_code == 201
+    headers = {"Authorization": f"Bearer {reg.json()['access_token']}"}
+
+    stud = c.post("/api/v1/students", json={
+        "student_number": "STU-I7",
+        "first_name": "Diana",
+        "last_name": "Prince",
+    }, headers=headers).json()["id"]
+
+    fee = c.post("/api/v1/fees", json={
+        "student_id": stud,
+        "billing_period": "2026-10",
+        "amount": 200.0,
+        "due_date": "2026-10-31",
+    }, headers=headers).json()["id"]
+
+    # 1. First payment
+    p1 = c.post("/api/v1/payments", json={
+        "fee_id": fee,
+        "amount": 50.0,
+    }, headers=headers)
+    assert p1.status_code == 201
+    r1_num = p1.json()["receipt"]["receipt_number"]
+
+    # 2. Second payment - receipts must increment atomically
+    p2 = c.post("/api/v1/payments", json={
+        "fee_id": fee,
+        "amount": 50.0,
+    }, headers=headers)
+    assert p2.status_code == 201
+    r2_num = p2.json()["receipt"]["receipt_number"]
+
+    # Sequence numbers
+    seq1 = int(r1_num.split("-")[-1])
+    seq2 = int(r2_num.split("-")[-1])
+    assert seq2 == seq1 + 1
+
+    # 3. Verify GET /chats/direct does not create thread side-effect
+    from app.models import ChatThread
+    from app.db import SessionLocal
+    with SessionLocal() as db:
+        initial_threads = db.query(ChatThread).count()
+
+    # Query direct chat for a non-existing thread
+    res = c.get(f"/api/v1/groups/chats/direct/{uuid4()}", headers=headers)
+    assert res.status_code in (200, 404)
+    with SessionLocal() as db:
+        after_threads = db.query(ChatThread).count()
+        assert after_threads == initial_threads, "GET /chats/direct must not mutate database"
+
+
+
 
