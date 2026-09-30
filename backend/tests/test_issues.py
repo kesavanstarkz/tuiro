@@ -738,6 +738,31 @@ def test_i4_scoped_access_and_cross_tenant_isolation(client: TestClient = None):
     db.close()
 
 
+def test_i10_subscription_plans_requires_auth(client: TestClient = None):
+    c = client or TestClient(app)
+
+    # 1. Unauthenticated request -> 401
+    res_unauth = c.get("/api/v1/subscription/plans")
+    assert res_unauth.status_code == 401, f"Expected 401, got {res_unauth.status_code}"
+
+    # Register an owner
+    email = f"i10-{uuid4().hex}@example.com"
+    reg = c.post("/api/v1/auth/register", json={
+        "organization_name": "I10 Plans Org",
+        "email": email,
+        "password": "Password123!",
+        "display_name": "I10 Owner",
+    })
+    assert reg.status_code == 201
+    owner_token = reg.json()["access_token"]
+    headers = {"Authorization": f"Bearer {owner_token}"}
+
+    # 2. Authenticated owner request -> 200
+    res_auth = c.get("/api/v1/subscription/plans", headers=headers)
+    assert res_auth.status_code == 200
+    assert isinstance(res_auth.json(), list)
+
+
 
 
 
