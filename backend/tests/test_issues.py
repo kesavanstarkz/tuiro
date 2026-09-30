@@ -236,3 +236,78 @@ def test_i3_group_fees_create_payments_receipts_and_dashboard_totals(client: Tes
     assert not any(f["fee_id"] == fee_id and f["student_id"] == student_id for f in attn_res.json())
 
 
+def test_i5_transaction_reference_unique_per_org(client: TestClient = None):
+    c = client or TestClient(app)
+
+    # 1. Register Org 1
+    reg1 = c.post("/api/v1/auth/register", json={
+        "email": f"i5-org1-{uuid4().hex}@example.com",
+        "password": "password123",
+        "display_name": "Org1 Owner",
+        "organization_name": "Org 1",
+    })
+    assert reg1.status_code == 201
+    h1 = {"Authorization": f"Bearer {reg1.json()['access_token']}"}
+
+    s1 = c.post("/api/v1/students", json={
+        "student_number": "STU-I5-1",
+        "first_name": "Student",
+        "last_name": "One",
+    }, headers=h1).json()["id"]
+
+    f1 = c.post("/api/v1/fees", json={
+        "student_id": s1,
+        "billing_period": "2026-10",
+        "amount": 100.0,
+        "due_date": "2026-10-30",
+    }, headers=h1).json()["id"]
+
+    # 2. Register Org 2
+    reg2 = c.post("/api/v1/auth/register", json={
+        "email": f"i5-org2-{uuid4().hex}@example.com",
+        "password": "password123",
+        "display_name": "Org2 Owner",
+        "organization_name": "Org 2",
+    })
+    assert reg2.status_code == 201
+    h2 = {"Authorization": f"Bearer {reg2.json()['access_token']}"}
+
+    s2 = c.post("/api/v1/students", json={
+        "student_number": "STU-I5-2",
+        "first_name": "Student",
+        "last_name": "Two",
+    }, headers=h2).json()["id"]
+
+    f2 = c.post("/api/v1/fees", json={
+        "student_id": s2,
+        "billing_period": "2026-10",
+        "amount": 100.0,
+        "due_date": "2026-10-30",
+    }, headers=h2).json()["id"]
+
+    # 3. Pay in Org 1 with REF-1
+    pay1 = c.post("/api/v1/payments", json={
+        "fee_id": f1,
+        "amount": 50.0,
+        "transaction_reference": "REF-1",
+    }, headers=h1)
+    assert pay1.status_code == 201, pay1.text
+
+    # 4. Same org uses REF-1 again -> 409 Conflict
+    dup_org1 = c.post("/api/v1/payments", json={
+        "fee_id": f1,
+        "amount": 50.0,
+        "transaction_reference": "REF-1",
+    }, headers=h1)
+    assert dup_org1.status_code == 409
+
+    # 5. Org 2 uses REF-1 -> should succeed (201)
+    pay2 = c.post("/api/v1/payments", json={
+        "fee_id": f2,
+        "amount": 50.0,
+        "transaction_reference": "REF-1",
+    }, headers=h2)
+    assert pay2.status_code == 201, pay2.text
+
+
+

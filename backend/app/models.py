@@ -337,6 +337,7 @@ class StudentFee(Base):
 
 class Payment(Base):
     __tablename__ = "payments"
+    __table_args__ = (UniqueConstraint("organization_id", "transaction_reference", name="uq_payments_org_transaction_ref"),)
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     organization_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
     fee_id: Mapped[UUID] = mapped_column(ForeignKey("student_fees.id"), index=True)
@@ -344,7 +345,7 @@ class Payment(Base):
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
     payment_date: Mapped[date] = mapped_column(Date, index=True)
     payment_method: Mapped[str] = mapped_column(String(30))
-    transaction_reference: Mapped[Optional[str]] = mapped_column(String(160), unique=True)
+    transaction_reference: Mapped[Optional[str]] = mapped_column(String(160))
     notes: Mapped[Optional[str]] = mapped_column(Text)
     recorded_by: Mapped[UUID] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

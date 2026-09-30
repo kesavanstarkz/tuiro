@@ -216,7 +216,7 @@ def pending_fees(principal: Principal = Depends(require_authenticated_user), db:
 @router.post("/payments", status_code=201)
 def record_payment(request: PaymentInput, principal: Principal = Depends(require_roles("OWNER", "ADMIN")), db: Session = Depends(get_db)):
     fee = _org_record(db, StudentFee, principal.organization_id, request.fee_id)
-    if request.transaction_reference and db.scalar(select(Payment).where(Payment.transaction_reference == request.transaction_reference)):
+    if request.transaction_reference and db.scalar(select(Payment).where(Payment.organization_id == principal.organization_id, Payment.transaction_reference == request.transaction_reference)):
         raise TuiroError("DUPLICATE_PAYMENT", "This transaction reference has already been recorded.", 409)
     paid = db.scalar(select(func.coalesce(func.sum(Payment.amount), 0)).where(Payment.fee_id == fee.id)) or Decimal("0")
     outstanding = fee.amount_due - paid
