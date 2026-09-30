@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -48,8 +48,18 @@ def create_record(db: Session, organization_id: UUID, kind: str, values: dict):
             current = db.scalar(select(func.count()).select_from(Student).where(Student.organization_id == organization_id, Student.status == "ACTIVE")) or 0
             if plan and plan.student_limit is not None and current >= plan.student_limit:
                 raise TuiroError("STUDENT_LIMIT_REACHED", "You have reached your student limit. Upgrade your plan to add more students.", 409)
-    record = model(organization_id=organization_id, **values)
-    db.add(record)
+    if kind == "classes":
+        if "id" not in values or not values["id"]:
+            values["id"] = uuid4()
+        record = model(organization_id=organization_id, **values)
+        db.add(record)
+        om = db.scalar(select(OrganizationMember).where(OrganizationMember.organization_id == organization_id))
+        user_id = om.user_id if om else None
+        if user_id:
+            db.add(Group(id=record.id, organization_id=organization_id, name=record.name, created_by=user_id))
+    else:
+        record = model(organization_id=organization_id, **values)
+        db.add(record)
     try:
         db.commit()
     except IntegrityError as exc:
@@ -58,14 +68,6 @@ def create_record(db: Session, organization_id: UUID, kind: str, values: dict):
             raise TuiroError("STUDENT_NUMBER_ALREADY_EXISTS", "That student number is already in use. Choose a unique number.", 409) from exc
         raise TuiroError("DUPLICATE_RECORD", "A record with those details already exists.", 409) from exc
     db.refresh(record)
-    if kind == "classes":
-        matching_group = db.scalar(select(Group).where(Group.id == record.id))
-        if not matching_group:
-            om = db.scalar(select(OrganizationMember).where(OrganizationMember.organization_id == organization_id))
-            user_id = om.user_id if om else None
-            if user_id:
-                db.add(Group(id=record.id, organization_id=organization_id, name=record.name, created_by=user_id))
-                db.commit()
     return record
 
 

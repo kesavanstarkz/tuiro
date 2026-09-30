@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from datetime import date, datetime, timezone
 from decimal import Decimal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field, model_validator
@@ -137,14 +137,14 @@ def list_groups(principal: Principal = Depends(require_authenticated_user), db: 
 
 @router.post("", status_code=201)
 def create_group(request: GroupInput, principal: Principal = Depends(require_roles(*EDITORS)), db: Session = Depends(get_db)):
-    group = Group(organization_id=principal.organization_id, name=request.name, created_by=principal.user.id)
+    group_id = uuid4()
+    group = Group(id=group_id, organization_id=principal.organization_id, name=request.name, created_by=principal.user.id)
     db.add(group)
-    # Ensure ClassGroup stays synchronized
-    cg = db.scalar(select(ClassGroup).where(ClassGroup.id == group.id))
-    if not cg:
-        cg = ClassGroup(id=group.id, organization_id=principal.organization_id, name=request.name, status="ACTIVE")
-        db.add(cg)
-    db.commit(); db.refresh(group)
+    # Ensure ClassGroup stays synchronized with the exact same id
+    cg = ClassGroup(id=group_id, organization_id=principal.organization_id, name=request.name, status="ACTIVE")
+    db.add(cg)
+    db.commit()
+    db.refresh(group)
     return _group_payload(db, group)
 
 
