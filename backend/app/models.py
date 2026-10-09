@@ -143,6 +143,68 @@ class Teacher(Base):
     status: Mapped[str] = mapped_column(String(30), default="ACTIVE")
 
 
+class Department(Base):
+    __tablename__ = "departments"
+    __table_args__ = (UniqueConstraint("organization_id", "name", name="uq_department_org_name"),)
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    organization_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(160))
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class JobTitle(Base):
+    __tablename__ = "job_titles"
+    __table_args__ = (UniqueConstraint("organization_id", "name", name="uq_job_title_org_name"),)
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    organization_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(160))
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class Employee(Base):
+    __tablename__ = "employees"
+    __table_args__ = (UniqueConstraint("organization_id", "employee_number", name="uq_employee_org_number"),)
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    organization_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    employee_number: Mapped[str] = mapped_column(String(80))
+    first_name: Mapped[str] = mapped_column(String(100))
+    last_name: Mapped[str] = mapped_column(String(100), default="")
+    email: Mapped[Optional[str]] = mapped_column(String(320), nullable=True)
+    phone: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    department_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("departments.id", ondelete="SET NULL"), nullable=True, index=True)
+    job_title_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("job_titles.id", ondelete="SET NULL"), nullable=True, index=True)
+    manager_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("employees.id", ondelete="SET NULL"), nullable=True, index=True)
+    employment_type: Mapped[str] = mapped_column(String(30), default="FULL_TIME")
+    start_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    status: Mapped[str] = mapped_column(String(30), default="ACTIVE", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class PersonCustomField(Base):
+    __tablename__ = "person_custom_fields"
+    __table_args__ = (UniqueConstraint("organization_id", "entity_type", "entity_id", "field_key", name="uq_person_custom_field"),)
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    organization_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    entity_type: Mapped[str] = mapped_column(String(30))
+    entity_id: Mapped[UUID] = mapped_column(index=True)
+    field_key: Mapped[str] = mapped_column(String(80))
+    value_json: Mapped[str] = mapped_column(Text)
+
+
+class PersonDocument(Base):
+    __tablename__ = "person_documents"
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    organization_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    entity_type: Mapped[str] = mapped_column(String(30))
+    entity_id: Mapped[UUID] = mapped_column(index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    storage_key: Mapped[str] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class ClassGroup(Base):
     __tablename__ = "classes"
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
@@ -563,4 +625,3 @@ class NotificationPreference(Base):
     email_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     sms_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     whatsapp_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
-
