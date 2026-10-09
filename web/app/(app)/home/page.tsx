@@ -1,0 +1,3 @@
+"use client";
+import { useTerm } from "@/components/use-term";
+export default function HomePage() { const { term, isLoading } = useTerm(); return <><h1 className="text-2xl font-semibold">Home</h1><p className="mt-2 text-slate-500">A live overview of your organization.</p><section className="mt-6 grid gap-4 sm:grid-cols-3">{[term("person"), term("group"), term("work_item")].map((name) => <div key={name} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900"><p className="text-sm text-slate-500">{name}</p><p className="mt-3 text-lg font-medium">{isLoading ? "Loading…" : "Connect data"}</p></div>)}</section></>; }

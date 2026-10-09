@@ -1,6 +1,6 @@
 # Tuiro Platform Build Progress
 
-## Current Status: Phase 1 P1-01 through P1-06 completed; P1-07 is next
+## Current Status: Phase 1 complete (P1-01 through P1-07)
 
 ---
 
@@ -63,7 +63,7 @@ python3 scripts/verify_routes.py
 - [x] **P1-04**: Auth completion (password reset, email verification, invitations flow, multi-org switching with org in token, rate limits).
 - [x] **P1-05**: Audit log service & events for security and financial mutations.
 - [x] **P1-06**: Notification core: user-scoped inbox, unread/read actions, preferences, idempotency keys, and a swappable thread-job runner. External email/SMS/WhatsApp delivery remains pending until a provider adapter is configured.
-- [ ] **P1-07**: Web app skeleton in `web/` (Next.js, auth screens, onboarding flow, permission & terminology-aware shell).
+- [x] **P1-07**: Web app skeleton in `web/` (Next.js, auth screens, onboarding flow, permission & terminology-aware shell). Connected login, registration, settings terminology editing, and notification inbox paths use the live API; later modules remain unavailable until their backend phases.
 
 ---
 
@@ -74,5 +74,14 @@ cd backend && ./.venv/bin/pytest
 # Output: 48 passed, 2 warnings in 8.96s
 ```
 
-## 6. Next Resume Point
-Begin **P1-07**: create the `web/` Next.js application with authenticated onboarding and a terminology-, permissions-, and modules-aware app shell.
+## 6. P1-07 Verification
+
+```bash
+cd web && npm run typecheck
+# Output: exited 0
+cd web && npm run build
+# Output: compiled successfully; generated 9 routes
+```
+
+## 7. Next Resume Point
+Begin **Phase 2**: write the detailed data migration and compatibility implementation for the unified group and membership model before changing existing class/group data paths.

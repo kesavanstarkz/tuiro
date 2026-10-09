@@ -1,0 +1,10 @@
+{
+  "/_not-found/page": "/_not-found",
+  "/onboarding/page": "/onboarding",
+  "/page": "/",
+  "/login/page": "/login",
+  "/(app)/[module]/page": "/[module]",
+  "/(app)/notifications/page": "/notifications",
+  "/(app)/home/page": "/home",
+  "/(app)/settings/page": "/settings"
+}
