@@ -1,6 +1,6 @@
 # Tuiro Platform Build Progress
 
-## Current Status: Phase 2 complete (P2-01 through P2-03)
+## Current Status: Phase 2 in progress (P2-01 and P2-02 complete; P2-03 partial)
 
 ---
 
@@ -87,7 +87,7 @@ cd web && npm run build
 
 - [x] **P2-01**: Added the canonical `groups` metadata and `group_memberships` history table through additive migration `2a1b4c6d8e0f`. Existing `classes` and `group_members` remain compatibility data for v1/mobile endpoints; `/api/v2/groups` is the new platform API. Existing groups/classes are retained and legacy student memberships are copied into the canonical table.
 - [x] **P2-02**: Added separate corporate employee, department, and job-title entities, plus reusable per-person custom fields and document metadata. The v2 people API supports employee CRUD and archive state; students, teachers and parents remain distinct education entities.
-- [x] **P2-03**: Added connected web People and Groups pages. Create forms and lists use the live v2 APIs and terminology labels; the existing tuition endpoints remain available for the mobile app.
+- [ ] **P2-03 (partial)**: Added connected web People and Groups list/create pages for corporate employee and canonical-group records. Create forms and lists use live v2 APIs and terminology labels; the existing tuition endpoints remain available for the mobile app. Education people/group pages, details/edit/archive, filters, and CSV import/export remain to be implemented.
 
 ### Phase 2 verification
 
@@ -112,4 +112,4 @@ cd web && npm run typecheck && npm run build
 3. `PersonDocument` stores metadata and a storage key only. Binary upload/download waits for the object-storage service in Phase 6.
 
 ## 8. Next Resume Point
-Begin **Phase 3**: unified attendance (including data migration from class/group attendance), calendars/policies, and the reusable request approval engine. Keep the tuition regression suite green.
+Continue **P2-03**: complete education/corporate people and group detail/edit/archive UI, server-side filters, and CSV import/export; then verify a corporate organization and an education organization through the web UI before starting Phase 3.
