@@ -1,6 +1,6 @@
 # Tuiro Platform Build Progress
 
-## Current Status: Phase 1 complete (P1-01 through P1-07)
+## Current Status: Phase 2 complete (P2-01 through P2-03)
 
 ---
 
@@ -83,5 +83,33 @@ cd web && npm run build
 # Output: compiled successfully; generated 9 routes
 ```
 
-## 7. Next Resume Point
-Begin **Phase 2**: write the detailed data migration and compatibility implementation for the unified group and membership model before changing existing class/group data paths.
+## 7. Phase 2: People and Groups
+
+- [x] **P2-01**: Added the canonical `groups` metadata and `group_memberships` history table through additive migration `2a1b4c6d8e0f`. Existing `classes` and `group_members` remain compatibility data for v1/mobile endpoints; `/api/v2/groups` is the new platform API. Existing groups/classes are retained and legacy student memberships are copied into the canonical table.
+- [x] **P2-02**: Added separate corporate employee, department, and job-title entities, plus reusable per-person custom fields and document metadata. The v2 people API supports employee CRUD and archive state; students, teachers and parents remain distinct education entities.
+- [x] **P2-03**: Added connected web People and Groups pages. Create forms and lists use the live v2 APIs and terminology labels; the existing tuition endpoints remain available for the mobile app.
+
+### Phase 2 verification
+
+```bash
+cd backend && ./.venv/bin/alembic upgrade head
+# Output: upgraded through 3b2c5d7e9f01 on SQLite.
+
+cd backend && ./.venv/bin/pytest
+# Output: 51 passed, 2 warnings in 9.61s
+
+cd backend && ./.venv/bin/alembic check
+# Output: No new upgrade operations detected.
+
+cd web && npm run typecheck && npm run build
+# Output: typecheck passed; Next.js production build passed and generated 11 routes.
+```
+
+### Phase 2 decisions and limitations
+
+1. The legacy `classes`, `class_students`, and `group_members` tables were deliberately not dropped. This is an additive, rollback-safe migration: v1 endpoints and the current mobile client continue to work while v2 reads canonical memberships.
+2. Membership identity is polymorphic (`member_type`, `member_id`) so a group can contain separate domain models without a giant generic person table. Student members are also maintained in the legacy `group_members` projection until Phase 9 migration.
+3. `PersonDocument` stores metadata and a storage key only. Binary upload/download waits for the object-storage service in Phase 6.
+
+## 8. Next Resume Point
+Begin **Phase 3**: unified attendance (including data migration from class/group attendance), calendars/policies, and the reusable request approval engine. Keep the tuition regression suite green.
