@@ -35,6 +35,12 @@ PERMISSION_MATRIX: dict[Tuple[str, str], Set[str]] = {
     ("PUT", "/api/v1/roles/{role_name}"): OWNER_ADMIN,
     ("DELETE", "/api/v1/roles/{role_name}"): OWNER_ADMIN,
 
+    # Terminology
+    ("GET", "/api/v1/terminology"): EVERYONE_AUTHENTICATED,
+    ("GET", "/api/v1/terminology/templates"): EVERYONE_AUTHENTICATED,
+    ("PUT", "/api/v1/terminology"): OWNER_ADMIN,
+    ("POST", "/api/v1/terminology/apply-template/{template_name}"): OWNER_ADMIN,
+
     # Students (Teacher gets read-only student roster; Owner/Admin manage)
     ("GET", "/api/v1/students"): STAFF,
     ("POST", "/api/v1/students"): OWNER_ADMIN,
