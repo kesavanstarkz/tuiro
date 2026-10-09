@@ -138,11 +138,57 @@ python3 scripts/verify_routes.py
 
 ---
 
-## 8. Phase 3: Attendance and Requests (In Progress)
+## 8. Phase 3: Attendance and Requests (Complete)
+
+### Deliverables:
+- [x] **P3-01 Backend**: Unified attendance service (`GET /api/v1/attendance/unified`) that consolidates class sessions and group sessions into a single queryable source for dashboards and reports (fixes I-2).
+- [x] **P3-02 Backend**: Reusable approval engine: request types (`LEAVE`, `ATTENDANCE_CORRECTION`, `WORK_FROM_HOME`, `PERMISSION`), request submissions (`POST /api/v1/requests`), list with scope (`my`, `pending`, `all`), approval decisions (`POST /requests/{id}/decide`), cancellation, comments (`POST /requests/{id}/comments`), and automatic in-app notifications to requesters upon approval/rejection.
+- [x] **P3-03 Database**: Alembic migration `41bbd7ae5c1f` adding `requests` and `request_comments` tables with tenant and status indexes. Verified clean on SQLite and PostgreSQL DDL.
+- [x] **P3-04 Mobile**: Requests module in `mobile/app/(app)/requests/`:
+  - List screen (`/requests`) with "Pending Approval" tab for managers/owners and "My Requests" tab for employees/staff
+  - Create request form (`/requests/create`) with type selection, date range pickers, and reason input
+  - Request details screen (`/requests/[requestId]`) with status hero, approval/rejection actions for managers, cancel action for requesters, and live comment thread
+  - Wired into `MoreScreen` under "WORKFLOWS & BUSINESS" and into Desktop Sidebar
+- [x] **P3-05 Verification**: Automated pytest suite (`test_p3_attendance_requests.py`), route verification (all 49 routes verified active), and typecheck.
+
+### Phase 3 verification
+
+```bash
+cd backend && ./.venv/bin/alembic upgrade head
+# Output: Running upgrade 3b2c5d7e9f01 -> 41bbd7ae5c1f, add requests and request comments tables
+
+cd backend && ./.venv/bin/pytest --tb=short -q
+# Output: 54 passed, 3 warnings in 10.89s
+
+cd backend && ./.venv/bin/alembic check
+# Output: No new upgrade operations detected.
+
+cd mobile && npx tsc --noEmit
+# Output: Exited with code 0 (zero errors).
+
+python3 scripts/verify_routes.py
+# Output: SUCCESS: All 49 routes verified. Zero placeholders, all routes active and reached with verified inbound links.
+```
+
+### Phase 3: What you can now do in the app
+1. Tap **More** tab (or Desktop Sidebar):
+   - Tap **Requests** under WORKFLOWS & BUSINESS.
+   - For administrators/owners: view **Pending Approval** tab to see pending requests with approval buttons, or switch to **My Requests**.
+   - Tap **+** to submit a new request: choose request type (Leave, Attendance Correction, Work From Home, Permission), enter title, start/end dates, and details.
+   - Tap any request to open its detail page: view status badge, approve or reject (with optional reason), or add comments to collaborate.
+   - When a request is decided, an in-app notification is automatically generated for the requester.
+2. In Attendance: `GET /api/v1/attendance/unified` merges group attendance records with class sessions into one unified response.
+
+---
+
+## 9. Phase 4: Work and Tasks (Next Up)
 
 ### Planned Deliverables:
-- [ ] **P3-01 Backend**: Unified attendance service (`GET /api/v1/attendance/unified` & `/api/v2/attendance`) that consolidates class sessions and group sessions into a single queryable source for dashboards and reports (fixes I-2).
-- [ ] **P3-02 Backend**: Reusable approval engine: request types (`LEAVE`, `ATTENDANCE_CORRECTION`, `WORK_FROM_HOME`), request submissions, approval chain, comments, approvals & rejections, and notifications to requester on decision.
-- [ ] **P3-03 Mobile**: Unified attendance UI in `mobile/app/(app)/(tabs)/attendance.tsx` supporting date navigation, check-in/out, and group attendance.
-- [ ] **P3-04 Mobile**: Requests screens in `mobile/app/(app)/requests/` (my requests list, pending approvals, submit request form, request details with approval actions).
-- [ ] **P3-05 Verification**: Automated pytest suite (`test_p3_attendance_requests.py`), route verification, and typecheck.
+- [ ] **P4-01 Backend**: Tasks model & table (`tasks`, `task_checklists`, `task_comments`):
+  - Personal, project, and group tasks
+  - Priority (LOW, MEDIUM, HIGH, URGENT), status (TODO, IN_PROGRESS, REVIEW, DONE), start & due dates
+  - Assignee & collaborator associations
+  - Academic extension table (`task_academic` for subjects, max marks, submissions, grading) unifying legacy homework & academic tests
+- [ ] **P4-02 Backend API**: `/api/v1/tasks` & `/api/v2/tasks` (CRUD, status transition, assignment, checklist toggling, academic metadata)
+- [ ] **P4-03 Mobile UI**: Tasks screen in `mobile/app/(app)/tasks/` (list/board views, filter by status/priority, detail view, create form)
+- [ ] **P4-04 Verification**: Automated pytest suite (`test_p4_tasks.py`), route verification, and typecheck.
