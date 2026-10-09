@@ -136,7 +136,9 @@ function DesktopSidebar() {
     ];
 
     const peopleNav = [
-        { label: "Parents", route: "/parents", icon: "account-group-outline" as const },
+        { label: "People", route: "/people", icon: "account-multiple-outline" as const },
+        { label: "Groups", route: "/groups", icon: "account-group-outline" as const },
+        { label: "Parents", route: "/parents", icon: "account-child-outline" as const },
         { label: "Teachers", route: "/teachers", icon: "account-tie-outline" as const },
     ];
 

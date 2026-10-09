@@ -56,6 +56,15 @@ This document lists every active route in the Tuiro mobile application (`mobile/
 | `/students/[studentId]/homework` | `mobile/app/(app)/students/[studentId]/homework.tsx` | Student Hub "Homework" card | Active |
 | `/students/[studentId]/parent` | `mobile/app/(app)/students/[studentId]/parent.tsx` | Student Hub "Parent" card | Active |
 | `/students/[studentId]/tests` | `mobile/app/(app)/students/[studentId]/tests.tsx` | Student Hub "Tests" card | Active |
+| `/people` | `mobile/app/(app)/people/index.tsx` | More menu, Desktop Sidebar | Active |
+| `/people/create` | `mobile/app/(app)/people/create.tsx` | People screen "+ Add employee", EmptyState action | Active |
+| `/people/[personId]` | `mobile/app/(app)/people/[personId]/index.tsx` | People list rows, Create redirect | Active |
+| `/people/[personId]/edit` | `mobile/app/(app)/people/[personId]/edit.tsx` | Person detail edit button | Active |
+| `/groups` | `mobile/app/(app)/groups/index.tsx` | More menu, Desktop Sidebar | Active |
+| `/groups/create` | `mobile/app/(app)/groups/create.tsx` | Groups screen "+ Create group", EmptyState action | Active |
+| `/groups/[groupId]` | `mobile/app/(app)/groups/[groupId]/index.tsx` | Groups list rows, Create redirect | Active |
+| `/groups/[groupId]/edit` | `mobile/app/(app)/groups/[groupId]/edit.tsx` | Group detail edit button | Active |
+| `/groups/[groupId]/add-member` | `mobile/app/(app)/groups/[groupId]/add-member.tsx` | Group detail 'Add' member action | Active |
 
 ---
 

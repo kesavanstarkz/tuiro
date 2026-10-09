@@ -81,6 +81,27 @@ def get_group(group_id: UUID, principal: Principal = Depends(require_roles(*STAF
     return _payload(_group(db, principal.organization_id, group_id))
 
 
+class GroupPatch(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=160)
+    kind: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_]{0,39}$")
+    description: str | None = Field(default=None, max_length=5000)
+    status: str | None = Field(default=None, pattern=r"^(ACTIVE|ARCHIVED)$")
+    metadata: dict[str, str] | None = None
+
+
+@router.patch("/{group_id:uuid}")
+def update_group(group_id: UUID, request: GroupPatch, principal: Principal = Depends(require_roles(*ADMINS)), db: Session = Depends(get_db)):
+    group = _group(db, principal.organization_id, group_id)
+    values = request.model_dump(exclude_unset=True)
+    if "metadata" in values:
+        values["metadata_json"] = json.dumps(values.pop("metadata"))
+    for key, value in values.items():
+        setattr(group, key, value)
+    db.commit()
+    db.refresh(group)
+    return _payload(group)
+
+
 @router.get("/{group_id:uuid}/members")
 def list_members(group_id: UUID, include_removed: bool = False, principal: Principal = Depends(require_roles(*STAFF)), db: Session = Depends(get_db)):
     _group(db, principal.organization_id, group_id)

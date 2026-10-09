@@ -53,6 +53,15 @@ ROUTES = [
     ("/students/[studentId]/homework", "(app)/students/[studentId]/homework.tsx", "Student Hub 'Homework' card", "Active"),
     ("/students/[studentId]/parent", "(app)/students/[studentId]/parent.tsx", "Student Hub 'Parent' card", "Active"),
     ("/students/[studentId]/tests", "(app)/students/[studentId]/tests.tsx", "Student Hub 'Tests' card", "Active"),
+    ("/people", "(app)/people/index.tsx", "More menu, Desktop Sidebar", "Active"),
+    ("/people/create", "(app)/people/create.tsx", "People screen '+ Add employee', EmptyState action", "Active"),
+    ("/people/[personId]", "(app)/people/[personId]/index.tsx", "People list rows, Create redirect", "Active"),
+    ("/people/[personId]/edit", "(app)/people/[personId]/edit.tsx", "Person detail edit button", "Active"),
+    ("/groups", "(app)/groups/index.tsx", "More menu, Desktop Sidebar", "Active"),
+    ("/groups/create", "(app)/groups/create.tsx", "Groups screen '+ Create group', EmptyState action", "Active"),
+    ("/groups/[groupId]", "(app)/groups/[groupId]/index.tsx", "Groups list rows, Create redirect", "Active"),
+    ("/groups/[groupId]/edit", "(app)/groups/[groupId]/edit.tsx", "Group detail edit button", "Active"),
+    ("/groups/[groupId]/add-member", "(app)/groups/[groupId]/add-member.tsx", "Group detail 'Add' member action", "Active"),
 ]
 
 

@@ -22,9 +22,11 @@ const GROUPS: Array<{ title: string; items: MenuItem[] }> = [
         ],
     },
     {
-        title: "PEOPLE",
+        title: "PEOPLE & GROUPS",
         items: [
-            { title: "Parents", route: "/parents", icon: "account-group-outline" },
+            { title: "People", route: "/people", icon: "account-multiple-outline" },
+            { title: "Groups", route: "/groups", icon: "account-group-outline" },
+            { title: "Parents", route: "/parents", icon: "account-child-outline" },
             { title: "Teachers", route: "/teachers", icon: "account-tie-outline" },
             { title: "Classes", route: "/classes", icon: "google-classroom" },
         ],
