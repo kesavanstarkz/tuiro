@@ -144,6 +144,11 @@ PERMISSION_MATRIX: dict[Tuple[str, str], Set[str]] = {
     ("POST", "/api/v1/notifications/fee-reminder/{fee_id}"): OWNER_ADMIN,
     ("GET", "/api/v1/notifications"): ALL_ORG_ROLES,
     ("POST", "/api/v1/notifications"): STAFF,
+    ("GET", "/api/v1/notifications/unread-count"): EVERYONE_AUTHENTICATED,
+    ("POST", "/api/v1/notifications/{notification_id}/read"): EVERYONE_AUTHENTICATED,
+    ("POST", "/api/v1/notifications/read-all"): EVERYONE_AUTHENTICATED,
+    ("GET", "/api/v1/notification-preferences"): EVERYONE_AUTHENTICATED,
+    ("PATCH", "/api/v1/notification-preferences"): EVERYONE_AUTHENTICATED,
 
     # Homework
     ("POST", "/api/v1/homework"): STAFF,
@@ -425,5 +430,4 @@ DEFAULT_ROLE_PERMISSIONS: dict[str, set[str]] = {
         PermissionCode.COMMUNICATION_ACCESS,
     },
 }
-
 

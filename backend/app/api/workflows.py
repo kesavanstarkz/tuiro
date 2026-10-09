@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import UUID
-from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
@@ -25,8 +24,9 @@ from app.core.permissions import (
 )
 from app.core.timezone import get_org_now, get_org_today
 from app.db import get_db
-from app.models import AcademicTest, AttendanceRecord, AttendanceSession, AuditLog, ClassGroup, ClassStudent, ClassTeacher, GroupAttendanceRecord, GroupAttendanceSession, GroupMember, Homework, Notification, Organization, OrganizationMember, Payment, Receipt, ScheduleEntry, Student, StudentFee, StudentParent, Parent, Teacher, TestMark, User
+from app.models import AcademicTest, AttendanceRecord, AttendanceSession, AuditLog, ClassGroup, ClassStudent, ClassTeacher, GroupAttendanceRecord, GroupAttendanceSession, GroupMember, Homework, Organization, OrganizationMember, Payment, Receipt, ScheduleEntry, Student, StudentFee, StudentParent, Parent, Teacher, TestMark, User
 from app.services.payment_provider import get_payment_provider
+from app.services.notifications import send_notification
 from app.services.receipts import build_receipt_pdf, generate_receipt_number
 
 router = APIRouter()
@@ -128,13 +128,6 @@ class ScheduleUpdate(BaseModel):
     start_time: str | None = None
     end_time: str | None = None
     room: str | None = None
-
-
-class NotificationInput(BaseModel):
-    recipient: str = Field(min_length=1, max_length=320)
-    channel: str = "WHATSAPP"
-    message: str = Field(min_length=1)
-    notification_type: str = "GENERAL"
 
 
 class AssignmentInput(BaseModel):
@@ -643,25 +636,12 @@ def send_receipt(receipt_id: UUID, principal: Principal = Depends(require_roles(
 def fee_reminder(fee_id: UUID, principal: Principal = Depends(require_roles("OWNER", "ADMIN")), db: Session = Depends(get_db)):
     fee = _org_record(db, StudentFee, principal.organization_id, fee_id)
     message = f"Your tuition fee for {fee.billing_period} is due. Amount: {fee.amount_due}."
-    notification = Notification(organization_id=principal.organization_id, recipient="parent contact required", channel="WHATSAPP", message=message, notification_type="FEE_REMINDER", status="PENDING")
-    db.add(notification); db.commit()
-    return {"notification_id": notification.id, "channel": "whatsapp_share", "url": f"https://wa.me/?text={quote(message)}", "message": message, "status": notification.status}
-
-
-@router.get("/notifications")
-def notification_history(principal: Principal = Depends(require_roles("OWNER", "ADMIN", "TEACHER", "PARENT", "STUDENT")), db: Session = Depends(get_db)):
-    return db.scalars(select(Notification).where(Notification.organization_id == principal.organization_id).order_by(Notification.created_at.desc()).limit(200)).all()
-
-
-@router.post("/notifications", status_code=201)
-def create_notification(request: NotificationInput, principal: Principal = Depends(require_roles("OWNER", "ADMIN", "TEACHER")), db: Session = Depends(get_db)):
-    # Delivery is deliberately not claimed here: a provider adapter must be configured
-    # before messages can transition from PENDING to SENT.
-    notification = Notification(organization_id=principal.organization_id, **request.model_dump(), status="PENDING", failure_reason="Delivery provider not configured")
-    db.add(notification)
-    db.commit()
-    db.refresh(notification)
-    return notification
+    notification = send_notification(
+        db, principal.organization_id, recipient_contact="parent contact required",
+        title="Fee reminder", channel="WHATSAPP", message=message,
+        notification_type="FEE_REMINDER", idempotency_key=f"fee-reminder:{fee.id}:{fee.billing_period}",
+    )
+    return {"notification_id": notification.id, "channel": notification.channel.lower(), "message": message, "status": notification.status}
 
 
 @router.post("/homework", status_code=201)

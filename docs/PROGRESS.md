@@ -1,6 +1,6 @@
 # Tuiro Platform Build Progress
 
-## Current Status: Phase 0 Completed, Moving to Phase 1
+## Current Status: Phase 1 P1-01 through P1-06 completed; P1-07 is next
 
 ---
 
@@ -57,15 +57,22 @@ python3 scripts/verify_routes.py
 
 ## 4. Work Remaining: Phase 1 (Platform Core)
 
-- [ ] **P1-01**: Permission catalog, configurable roles, single permission matrix, and "every operation x every role" parameterized test.
-- [ ] **P1-02**: Organization model extensions (type, timezone, currency, enabled modules, settings).
-- [ ] **P1-03**: Terminology engine (backend service + API + starter templates for Corporate & Education + tests, and `useTerm` design).
-- [ ] **P1-04**: Auth completion (password reset, email verification, invitations flow, multi-org switching with org in token, rate limits).
-- [ ] **P1-05**: Audit log service & events for security and financial mutations.
-- [ ] **P1-06**: Notification core (tables, service, preferences, idempotency keys, background job interface).
+- [x] **P1-01**: Permission catalog, configurable roles, single permission matrix, and "every operation x every role" parameterized test.
+- [x] **P1-02**: Organization model extensions (type, timezone, currency, enabled modules, settings).
+- [x] **P1-03**: Terminology engine (backend service + API + starter templates for Corporate & Education + tests, and `useTerm` design).
+- [x] **P1-04**: Auth completion (password reset, email verification, invitations flow, multi-org switching with org in token, rate limits).
+- [x] **P1-05**: Audit log service & events for security and financial mutations.
+- [x] **P1-06**: Notification core: user-scoped inbox, unread/read actions, preferences, idempotency keys, and a swappable thread-job runner. External email/SMS/WhatsApp delivery remains pending until a provider adapter is configured.
 - [ ] **P1-07**: Web app skeleton in `web/` (Next.js, auth screens, onboarding flow, permission & terminology-aware shell).
 
 ---
 
-## 5. Next Resume Point
-Begin **P1-01**: Permission catalog and configurable roles.
+## 5. P1-06 Verification
+
+```bash
+cd backend && ./.venv/bin/pytest
+# Output: 48 passed, 2 warnings in 8.96s
+```
+
+## 6. Next Resume Point
+Begin **P1-07**: create the `web/` Next.js application with authenticated onboarding and a terminology-, permissions-, and modules-aware app shell.
