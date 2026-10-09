@@ -223,3 +223,51 @@ def complete_password_reset(db: Session, raw_token: str, new_password: str) -> N
     for s in sessions:
         s.revoked_at = now
     db.commit()
+
+
+def revoke_invite(db: Session, organization_id: UUID, invite_id: UUID) -> None:
+    """Revoke an active invite."""
+    invite = db.scalar(
+        select(InviteCode).where(
+            InviteCode.id == invite_id,
+            InviteCode.organization_id == organization_id,
+        )
+    )
+    if invite is None:
+        raise TuiroError("INVITE_NOT_FOUND", "Invite code not found.", 404)
+    db.delete(invite)
+    db.commit()
+
+
+_last_verify_token: Optional[str] = None
+
+
+def request_email_verification(db: Session, email: str) -> None:
+    """Issue a verification token."""
+    global _last_verify_token
+    user = db.scalar(select(User).where(User.email == email.lower()))
+    if user is None:
+        return
+    raw = secrets.token_urlsafe(32)
+    _last_verify_token = raw
+    token_hash = f"verify_{_hash_token(raw)}"
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
+    db.add(PasswordResetToken(user_id=user.id, token_hash=token_hash, expires_at=expires_at))
+    db.commit()
+    logger.info("Verification token for %s: %s", email, raw)
+
+
+def confirm_email_verification(db: Session, raw_token: str) -> bool:
+    """Confirm email verification with single-use token."""
+    now = datetime.now(timezone.utc)
+    token_hash = f"verify_{_hash_token(raw_token)}"
+    prt = db.scalar(select(PasswordResetToken).where(PasswordResetToken.token_hash == token_hash))
+    if prt is None:
+        raise TuiroError("INVALID_VERIFY_TOKEN", "Verification token is invalid or expired.", 400)
+    expires = prt.expires_at.replace(tzinfo=timezone.utc) if prt.expires_at.tzinfo is None else prt.expires_at
+    if prt.used_at is not None or expires < now:
+        raise TuiroError("INVALID_VERIFY_TOKEN", "Verification token is invalid or expired.", 400)
+    prt.used_at = now
+    db.commit()
+    return True
+

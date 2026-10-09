@@ -17,6 +17,9 @@ from app.services import auth, invite_reset
 router = APIRouter()
 
 
+from app.core.rate_limit import check_rate_limit
+
+
 @router.post("/register", response_model=TokenPair, status_code=201)
 def register(request: RegisterRequest, db: Session = Depends(get_db)) -> TokenPair:
     return auth.register(db, request)
@@ -24,6 +27,7 @@ def register(request: RegisterRequest, db: Session = Depends(get_db)) -> TokenPa
 
 @router.post("/login", response_model=TokenPair)
 def login(request: LoginRequest, db: Session = Depends(get_db)) -> TokenPair:
+    check_rate_limit(f"login_{request.email.lower()}", max_attempts=15, window_seconds=60)
     return auth.login(db, request)
 
 
@@ -134,8 +138,17 @@ def list_invites(
     ]
 
 
+@router.delete("/invites/{invite_id}", status_code=204)
+def revoke_invite(
+    invite_id: UUID,
+    principal: Principal = Depends(require_roles("OWNER", "ADMIN")),
+    db: Session = Depends(get_db),
+) -> None:
+    invite_reset.revoke_invite(db, organization_id=principal.organization_id, invite_id=invite_id)
+
+
 # ---------------------------------------------------------------------------
-# F-5: Password reset
+# F-5: Password reset & Rate Limiting
 # ---------------------------------------------------------------------------
 
 class PasswordResetRequestBody(BaseModel):
@@ -149,9 +162,36 @@ class PasswordResetCompleteBody(BaseModel):
 
 @router.post("/password-reset/request", status_code=204)
 def request_password_reset(request: PasswordResetRequestBody, db: Session = Depends(get_db)) -> None:
+    check_rate_limit(f"pwd_reset_{request.email.lower()}", max_attempts=5, window_seconds=60)
     invite_reset.request_password_reset(db, request.email)
 
 
 @router.post("/password-reset/complete", status_code=204)
 def complete_password_reset(request: PasswordResetCompleteBody, db: Session = Depends(get_db)) -> None:
+    check_rate_limit("pwd_reset_complete", max_attempts=10, window_seconds=60)
     invite_reset.complete_password_reset(db, request.token, request.new_password)
+
+
+# ---------------------------------------------------------------------------
+# Email Verification
+# ---------------------------------------------------------------------------
+
+class EmailVerifyRequestBody(BaseModel):
+    email: str = Field(min_length=1, max_length=320)
+
+
+class EmailVerifyConfirmBody(BaseModel):
+    token: str = Field(min_length=1)
+
+
+@router.post("/verify-email/request", status_code=204)
+def request_email_verification(request: EmailVerifyRequestBody, db: Session = Depends(get_db)) -> None:
+    check_rate_limit(f"verify_email_{request.email.lower()}", max_attempts=5, window_seconds=60)
+    invite_reset.request_email_verification(db, request.email)
+
+
+@router.post("/verify-email/confirm")
+def confirm_email_verification(request: EmailVerifyConfirmBody, db: Session = Depends(get_db)) -> dict:
+    check_rate_limit("verify_email_confirm", max_attempts=10, window_seconds=60)
+    success = invite_reset.confirm_email_verification(db, request.token)
+    return {"verified": success}

@@ -27,6 +27,9 @@ PERMISSION_MATRIX: dict[Tuple[str, str], Set[str]] = {
     ("GET", "/api/v1/me"): EVERYONE_AUTHENTICATED,
     ("POST", "/api/v1/auth/logout"): EVERYONE_AUTHENTICATED,
     ("POST", "/api/v1/auth/switch-organization"): EVERYONE_AUTHENTICATED,
+    ("POST", "/api/v1/auth/invites"): OWNER_ADMIN,
+    ("GET", "/api/v1/auth/invites"): OWNER_ADMIN,
+    ("DELETE", "/api/v1/auth/invites/{invite_id}"): OWNER_ADMIN,
 
     # Roles & Permissions
     ("GET", "/api/v1/roles/permissions"): EVERYONE_AUTHENTICATED,
