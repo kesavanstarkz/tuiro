@@ -181,6 +181,13 @@ class Group(Base):
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     organization_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String(160))
+    # `kind` is canonical. Its display label is resolved through terminology;
+    # never use it to infer whether a member is a student, employee, or teacher.
+    kind: Mapped[str] = mapped_column(String(40), default="class", index=True)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    metadata_json: Mapped[str] = mapped_column(Text, default="{}")
+    status: Mapped[str] = mapped_column(String(30), default="ACTIVE", index=True)
+    parent_group_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("groups.id", ondelete="SET NULL"), nullable=True, index=True)
     created_by: Mapped[UUID] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -194,6 +201,28 @@ class GroupMember(Base):
     student_id: Mapped[UUID] = mapped_column(ForeignKey("students.id", ondelete="CASCADE"), index=True)
     joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     removed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class GroupMembership(Base):
+    """Canonical group membership with an auditable removal history.
+
+    The old ``group_members`` table remains a compatibility projection for the
+    education mobile client.  New platform code reads this table instead.
+    """
+    __tablename__ = "group_memberships"
+    __table_args__ = (
+        UniqueConstraint("group_id", "member_type", "member_id", name="uq_group_member_identity"),
+        Index("ix_group_memberships_org_group_active", "organization_id", "group_id", "removed_at"),
+    )
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    organization_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    group_id: Mapped[UUID] = mapped_column(ForeignKey("groups.id", ondelete="CASCADE"), index=True)
+    member_type: Mapped[str] = mapped_column(String(30), default="student")
+    member_id: Mapped[UUID] = mapped_column(index=True)
+    member_role: Mapped[str] = mapped_column(String(30), default="member")
+    joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    removed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    added_by: Mapped[Optional[UUID]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
 
 class GroupSchedule(Base):
@@ -534,5 +563,4 @@ class NotificationPreference(Base):
     email_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     sms_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     whatsapp_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
-
 
