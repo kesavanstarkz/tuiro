@@ -143,6 +143,7 @@ function DesktopSidebar() {
     ];
 
     const businessNav = [
+        { label: "Requests", route: "/requests", icon: "file-document-edit-outline" as const },
         { label: "Receipts", route: "/receipts", icon: "receipt-text-outline" as const },
         { label: "Payments", route: "/payments", icon: "cash-check" as const },
         { label: "Reports", route: "/reports", icon: "chart-line" as const },

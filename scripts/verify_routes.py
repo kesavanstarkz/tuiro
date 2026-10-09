@@ -62,6 +62,9 @@ ROUTES = [
     ("/groups/[groupId]", "(app)/groups/[groupId]/index.tsx", "Groups list rows, Create redirect", "Active"),
     ("/groups/[groupId]/edit", "(app)/groups/[groupId]/edit.tsx", "Group detail edit button", "Active"),
     ("/groups/[groupId]/add-member", "(app)/groups/[groupId]/add-member.tsx", "Group detail 'Add' member action", "Active"),
+    ("/requests", "(app)/requests/index.tsx", "More menu, Desktop Sidebar", "Active"),
+    ("/requests/create", "(app)/requests/create.tsx", "Requests screen '+ New request', EmptyState action", "Active"),
+    ("/requests/[requestId]", "(app)/requests/[requestId]/index.tsx", "Requests list rows, Create redirect", "Active"),
 ]
 
 

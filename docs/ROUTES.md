@@ -65,6 +65,9 @@ This document lists every active route in the Tuiro mobile application (`mobile/
 | `/groups/[groupId]` | `mobile/app/(app)/groups/[groupId]/index.tsx` | Groups list rows, Create redirect | Active |
 | `/groups/[groupId]/edit` | `mobile/app/(app)/groups/[groupId]/edit.tsx` | Group detail edit button | Active |
 | `/groups/[groupId]/add-member` | `mobile/app/(app)/groups/[groupId]/add-member.tsx` | Group detail 'Add' member action | Active |
+| `/requests` | `mobile/app/(app)/requests/index.tsx` | More menu, Desktop Sidebar | Active |
+| `/requests/create` | `mobile/app/(app)/requests/create.tsx` | Requests screen "+ New request", EmptyState action | Active |
+| `/requests/[requestId]` | `mobile/app/(app)/requests/[requestId]/index.tsx` | Requests list rows, Create redirect | Active |
 
 ---
 

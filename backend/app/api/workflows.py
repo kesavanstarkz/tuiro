@@ -214,6 +214,67 @@ def student_attendance(student_id: UUID, principal: Principal = Depends(require_
     return db.scalars(select(AttendanceRecord).join(AttendanceSession, AttendanceRecord.session_id == AttendanceSession.id).where(AttendanceSession.organization_id == principal.organization_id, AttendanceRecord.student_id == student_id)).all()
 
 
+@router.get("/attendance/unified")
+def unified_attendance(
+    session_date: date | None = None,
+    group_id: UUID | None = None,
+    principal: Principal = Depends(require_roles("OWNER", "ADMIN", "TEACHER")),
+    db: Session = Depends(get_db),
+):
+    """Consolidated attendance query returning sessions and records from both class and group models."""
+    org_id = principal.organization_id
+
+    # 1. Class sessions
+    cq = select(AttendanceSession).where(AttendanceSession.organization_id == org_id)
+    if session_date:
+        cq = cq.where(AttendanceSession.session_date == session_date)
+    if group_id:
+        cq = cq.where(AttendanceSession.class_id == group_id)
+    class_sessions = db.scalars(cq.order_by(AttendanceSession.session_date.desc()).limit(100)).all()
+
+    # 2. Group sessions
+    gq = select(GroupAttendanceSession).where(GroupAttendanceSession.organization_id == org_id)
+    if session_date:
+        gq = gq.where(GroupAttendanceSession.session_date == session_date)
+    if group_id:
+        gq = gq.where(GroupAttendanceSession.group_id == group_id)
+    group_sessions = db.scalars(gq.order_by(GroupAttendanceSession.session_date.desc()).limit(100)).all()
+
+    results = []
+    seen_keys = set()
+
+    for s in class_sessions:
+        records = db.scalars(select(AttendanceRecord).where(AttendanceRecord.session_id == s.id)).all()
+        key = (s.session_date, s.class_id)
+        seen_keys.add(key)
+        results.append({
+            "id": str(s.id),
+            "source": "class",
+            "group_id": str(s.class_id),
+            "session_date": str(s.session_date),
+            "total_students": len(records),
+            "present_count": sum(1 for r in records if r.status in ("PRESENT", "LATE")),
+            "records": [{"student_id": str(r.student_id), "status": r.status, "notes": r.notes} for r in records],
+        })
+
+    for s in group_sessions:
+        key = (s.session_date, s.group_id)
+        if key in seen_keys:
+            continue
+        records = db.scalars(select(GroupAttendanceRecord).where(GroupAttendanceRecord.session_id == s.id)).all()
+        results.append({
+            "id": str(s.id),
+            "source": "group",
+            "group_id": str(s.group_id),
+            "session_date": str(s.session_date),
+            "total_students": len(records),
+            "present_count": sum(1 for r in records if r.status in ("PRESENT", "LATE")),
+            "records": [{"student_id": str(r.student_id), "status": r.status, "notes": r.notes} for r in records],
+        })
+
+    return results
+
+
 @router.post("/fees/generate")
 def generate_fees(request: FeeGenerationInput, principal: Principal = Depends(require_roles("OWNER", "ADMIN")), db: Session = Depends(get_db)):
     students = db.scalars(select(Student).where(Student.organization_id == principal.organization_id, Student.status == "ACTIVE")).all()
