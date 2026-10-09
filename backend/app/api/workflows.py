@@ -1177,30 +1177,91 @@ def get_student_report_card(
 
 class SettingsInput(BaseModel):
     name: str | None = None
+    org_type: str | None = Field(default=None, pattern="^(EDUCATION|CORPORATE)$")
     country_code: str | None = None
     currency_code: str | None = None
     currency: str | None = None
     timezone: str | None = None
     locale: str | None = None
+    enabled_modules: list[str] | None = None
+    settings: dict | None = None
+
+
+def _org_settings_payload(organization: Organization) -> dict:
+    try:
+        modules = json.loads(organization.enabled_modules) if organization.enabled_modules else []
+    except Exception:
+        modules = []
+    try:
+        settings_dict = json.loads(organization.settings) if organization.settings else {}
+    except Exception:
+        settings_dict = {}
+
+    return {
+        "id": str(organization.id),
+        "name": organization.name,
+        "org_type": organization.org_type or "EDUCATION",
+        "country_code": organization.country_code,
+        "currency_code": organization.currency_code,
+        "currency": organization.currency_code,
+        "timezone": organization.timezone,
+        "locale": organization.locale,
+        "enabled_modules": modules,
+        "settings": settings_dict,
+        "created_at": organization.created_at,
+    }
 
 
 @router.patch("/settings")
 def update_settings(request: SettingsInput, principal: Principal = Depends(require_roles("OWNER", "ADMIN")), db: Session = Depends(get_db)):
     organization = db.get(Organization, principal.organization_id)
-    if organization is None: raise TuiroError("ORGANIZATION_NOT_FOUND", "Organization not found.", 404)
+    if organization is None:
+        raise TuiroError("ORGANIZATION_NOT_FOUND", "Organization not found.", 404)
     data = request.model_dump(exclude_unset=True)
     if "currency" in data and "currency_code" not in data:
         data["currency_code"] = data.pop("currency")
     elif "currency" in data:
         data.pop("currency")
-    for key, value in data.items(): setattr(organization, key, value)
-    db.commit(); db.refresh(organization); return organization
+
+    if "currency_code" in data and data["currency_code"]:
+        data["currency_code"] = data["currency_code"].upper()
+
+    if "timezone" in data and data["timezone"]:
+        try:
+            from zoneinfo import ZoneInfo
+            ZoneInfo(data["timezone"])
+        except Exception:
+            raise TuiroError("INVALID_TIMEZONE", f"Invalid timezone '{data['timezone']}'.", 422)
+
+    if "enabled_modules" in data:
+        organization.enabled_modules = json.dumps(data.pop("enabled_modules"))
+
+    if "settings" in data:
+        current_settings = {}
+        if organization.settings:
+            try:
+                current_settings = json.loads(organization.settings)
+            except Exception:
+                current_settings = {}
+        if isinstance(data["settings"], dict):
+            current_settings.update(data["settings"])
+            organization.settings = json.dumps(current_settings)
+        data.pop("settings")
+
+    for key, value in data.items():
+        setattr(organization, key, value)
+
+    db.commit()
+    db.refresh(organization)
+    return _org_settings_payload(organization)
 
 
 @router.get("/settings")
 def get_settings(principal: Principal = Depends(require_roles("OWNER", "ADMIN")), db: Session = Depends(get_db)):
     organization = db.get(Organization, principal.organization_id)
-    return organization
+    if organization is None:
+        raise TuiroError("ORGANIZATION_NOT_FOUND", "Organization not found.", 404)
+    return _org_settings_payload(organization)
 
 
 @router.get("/subscription")
