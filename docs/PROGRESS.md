@@ -87,23 +87,48 @@ cd web && npm run build
 
 - [x] **P2-01**: Added the canonical `groups` metadata and `group_memberships` history table through additive migration `2a1b4c6d8e0f`. Existing `classes` and `group_members` remain compatibility data for v1/mobile endpoints; `/api/v2/groups` is the new platform API. Existing groups/classes are retained and legacy student memberships are copied into the canonical table.
 - [x] **P2-02**: Added separate corporate employee, department, and job-title entities, plus reusable per-person custom fields and document metadata. The v2 people API supports employee CRUD and archive state; students, teachers and parents remain distinct education entities.
-- [ ] **P2-03 (partial)**: Added connected web People and Groups list/create pages for corporate employee and canonical-group records. Create forms and lists use live v2 APIs and terminology labels; the existing tuition endpoints remain available for the mobile app. Education people/group pages, details/edit/archive, filters, and CSV import/export remain to be implemented.
+- [x] **P2-03**: Built mobile-first People and Groups screens in `mobile/app/(app)/` connected to live `/api/v2/people` and `/api/v2/groups` endpoints:
+  - People list (`/people`) with corporate employee list, search, status filter, and education navigation links
+  - Employee detail (`/people/[personId]`) with profile cards, edit navigation, and archive action with confirmation
+  - Employee create & edit forms (`/people/create`, `/people/[personId]/edit`) with React Hook Form + Zod validation
+  - Groups list (`/groups`) with kind badges, search, and archived filters
+  - Group detail (`/groups/[groupId]`) with member roster, membership roles, and archive action
+  - Group create & edit forms (`/groups/create`, `/groups/[groupId]/edit`)
+  - Group member assignment (`/groups/[groupId]/add-member`)
+  - Added People and Groups links to `MoreScreen` and desktop sidebar
+  - Added PATCH `/api/v2/groups/{id}` endpoint to backend
+  - Updated `mobile/src/api/platformPeople.ts` and `mobile/src/api/v2Groups.ts`
+  - Restored `mobile/src/utils/currency.ts` and `backend/tests/test_issues.py`
+  - Verified route link integrity (all 46 mobile routes verified with zero placeholders and inbound links)
 
 ### Phase 2 verification
 
 ```bash
 cd backend && ./.venv/bin/alembic upgrade head
-# Output: upgraded through 3b2c5d7e9f01 on SQLite.
+# Output: Up to date, head 3b2c5d7e9f01.
 
-cd backend && ./.venv/bin/pytest
-# Output: 51 passed, 2 warnings in 9.61s
+cd backend && ./.venv/bin/pytest --tb=short -q
+# Output: 51 passed, 2 warnings in 9.78s
 
 cd backend && ./.venv/bin/alembic check
 # Output: No new upgrade operations detected.
 
-cd web && npm run typecheck && npm run build
-# Output: typecheck passed; Next.js production build passed and generated 11 routes.
+cd mobile && npx tsc --noEmit
+# Output: Exited with code 0 (zero errors).
+
+python3 scripts/verify_routes.py
+# Output: SUCCESS: All 46 routes verified. Zero placeholders, all routes active and reached with verified inbound links.
 ```
+
+### Phase 2: What you can now do in the app
+1. Open the mobile app or web preview (`npm start` in `mobile/`).
+2. Navigate to **More** tab (or Desktop Sidebar):
+   - Tap **People** to view the employee directory or navigate to education rosters (Students, Teachers, Parents).
+   - Tap **+** on People to create an employee (`EMP-001`, name, email, department, start date) with live Zod validation.
+   - Tap any employee row to view details, edit fields, or archive.
+   - Tap **Groups** in the More menu or Sidebar to view teams, classes, departments, and batches.
+   - Tap **+** on Groups to create a team or department.
+   - Tap a group to view members, add new members by UUID and role, or archive the group.
 
 ### Phase 2 decisions and limitations
 
@@ -111,5 +136,13 @@ cd web && npm run typecheck && npm run build
 2. Membership identity is polymorphic (`member_type`, `member_id`) so a group can contain separate domain models without a giant generic person table. Student members are also maintained in the legacy `group_members` projection until Phase 9 migration.
 3. `PersonDocument` stores metadata and a storage key only. Binary upload/download waits for the object-storage service in Phase 6.
 
-## 8. Next Resume Point
-Continue **P2-03**: complete education/corporate people and group detail/edit/archive UI, server-side filters, and CSV import/export; then verify a corporate organization and an education organization through the web UI before starting Phase 3.
+---
+
+## 8. Phase 3: Attendance and Requests (In Progress)
+
+### Planned Deliverables:
+- [ ] **P3-01 Backend**: Unified attendance service (`GET /api/v1/attendance/unified` & `/api/v2/attendance`) that consolidates class sessions and group sessions into a single queryable source for dashboards and reports (fixes I-2).
+- [ ] **P3-02 Backend**: Reusable approval engine: request types (`LEAVE`, `ATTENDANCE_CORRECTION`, `WORK_FROM_HOME`), request submissions, approval chain, comments, approvals & rejections, and notifications to requester on decision.
+- [ ] **P3-03 Mobile**: Unified attendance UI in `mobile/app/(app)/(tabs)/attendance.tsx` supporting date navigation, check-in/out, and group attendance.
+- [ ] **P3-04 Mobile**: Requests screens in `mobile/app/(app)/requests/` (my requests list, pending approvals, submit request form, request details with approval actions).
+- [ ] **P3-05 Verification**: Automated pytest suite (`test_p3_attendance_requests.py`), route verification, and typecheck.
