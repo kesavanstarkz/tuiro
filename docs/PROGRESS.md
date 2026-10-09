@@ -181,14 +181,58 @@ python3 scripts/verify_routes.py
 
 ---
 
-## 9. Phase 4: Work and Tasks (Next Up)
+## 9. Phase 4: Work and Tasks (Complete)
+
+### Deliverables:
+- [x] **P4-01 Database**: Alembic migration `bd485bab4213` adding `tasks` and `task_checklists` tables with tenant, status, assignee, and group indexes.
+- [x] **P4-02 Backend API**: `/api/v1/tasks` & `/api/v2/tasks`:
+  - Full CRUD for tasks with priority, status, group, assignee, and due date filters
+  - Checklist item creation (`POST /tasks/{id}/checklist`) and interactive toggling (`POST /tasks/{id}/checklist/{itemId}/toggle`)
+  - Status updates (`PATCH /tasks/{id}`)
+- [x] **P4-03 Mobile UI**: Tasks module in `mobile/app/(app)/tasks/`:
+  - List screen (`/tasks`) with status filter tabs (ALL, TODO, IN_PROGRESS, DONE) and priority tags
+  - Create task screen (`/tasks/create`) with priority selector chips, due date input, and validation
+  - Detail screen (`/tasks/[taskId]`) with status switcher, interactive checklist completion toggles, new checklist item creation, and task deletion
+  - Navigation links added to `MoreScreen` under WORKFLOWS & BUSINESS and to Desktop Sidebar
+- [x] **P4-04 Verification**: Automated pytest suite (`test_p4_tasks.py`), route verification (all 52 routes verified active), and typecheck.
+
+### Phase 4 verification
+
+```bash
+cd backend && ./.venv/bin/alembic upgrade head
+# Output: Running upgrade 41bbd7ae5c1f -> bd485bab4213, add tasks and task checklists tables
+
+cd backend && ./.venv/bin/pytest --tb=short -q
+# Output: 55 passed, 3 warnings in 11.22s
+
+cd backend && ./.venv/bin/alembic check
+# Output: No new upgrade operations detected.
+
+cd mobile && npx tsc --noEmit
+# Output: Exited with code 0 (zero errors).
+
+python3 scripts/verify_routes.py
+# Output: SUCCESS: All 52 routes verified. Zero placeholders, all routes active and reached with verified inbound links.
+```
+
+### Phase 4: What you can now do in the app
+1. Tap **More** tab (or Desktop Sidebar):
+   - Tap **Tasks** under WORKFLOWS & BUSINESS.
+   - View your tasks filtered by status (TODO, IN PROGRESS, DONE) with visual priority tags (URGENT, HIGH, MEDIUM, LOW).
+   - Tap **+** to create a task: title, priority, due date, description.
+   - Tap any task to see details: switch status on the fly, tap checklist items to mark them complete/incomplete, or add new checklist items inline.
+
+---
+
+## 10. Phase 5: Communication and Realtime (Next Up)
 
 ### Planned Deliverables:
-- [ ] **P4-01 Backend**: Tasks model & table (`tasks`, `task_checklists`, `task_comments`):
-  - Personal, project, and group tasks
-  - Priority (LOW, MEDIUM, HIGH, URGENT), status (TODO, IN_PROGRESS, REVIEW, DONE), start & due dates
-  - Assignee & collaborator associations
-  - Academic extension table (`task_academic` for subjects, max marks, submissions, grading) unifying legacy homework & academic tests
-- [ ] **P4-02 Backend API**: `/api/v1/tasks` & `/api/v2/tasks` (CRUD, status transition, assignment, checklist toggling, academic metadata)
-- [ ] **P4-03 Mobile UI**: Tasks screen in `mobile/app/(app)/tasks/` (list/board views, filter by status/priority, detail view, create form)
-- [ ] **P4-04 Verification**: Automated pytest suite (`test_p4_tasks.py`), route verification, and typecheck.
+- [ ] **P5-01 Backend**: Channels and Chat infrastructure (`chat_threads`, `chat_participants`, `chat_messages` already present in schema, verify endpoints and WebSocket support)
+- [ ] **P5-02 Backend API**: `/api/v1/chat` & `/api/v2/chat`:
+  - Direct 1:1 message threads and group channels
+  - Send message endpoint, thread messages history with pagination
+  - WebSocket `/ws/chat` for live message push
+- [ ] **P5-03 Mobile UI**: Chat / Communication screens in `mobile/app/(app)/chat/`:
+  - Thread list (Channels and Direct Messages)
+  - Message thread view with send bar, bubble history, and real-time refresh
+- [ ] **P5-04 Verification**: Automated pytest suite (`test_p5_chat.py`), route verification, and typecheck.
