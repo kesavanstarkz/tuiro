@@ -167,6 +167,7 @@ PERMISSION_MATRIX: dict[Tuple[str, str], Set[str]] = {
 
     # Dashboard & Reports
     ("GET", "/api/v1/dashboard"): OWNER_ADMIN,
+    ("GET", "/api/v1/audit-logs"): OWNER_ADMIN,
     ("GET", "/api/v1/reports/fees"): OWNER_ADMIN,
     ("GET", "/api/v1/reports/attendance"): OWNER_ADMIN,
     ("GET", "/api/v1/reports/fees/export.csv"): OWNER_ADMIN,
