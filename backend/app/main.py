@@ -6,6 +6,7 @@ from app.api.auth import me
 from app.api.auth import router as auth_router
 from app.api.people import router as people_router
 from app.api.groups import router as groups_router
+from app.api.roles import router as roles_router
 from app.api.workflows import router as workflows_router
 from app.core.config import settings
 from app.core.errors import register_error_handlers
@@ -19,6 +20,7 @@ class HealthResponse(BaseModel):
 app = FastAPI(title="Tuiro API", version="0.2.0")
 register_error_handlers(app)
 app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
+app.include_router(roles_router, prefix="/api/v1", tags=["roles"])
 app.include_router(people_router, prefix="/api/v1", tags=["people"])
 app.include_router(groups_router, prefix="/api/v1")
 app.include_router(workflows_router, prefix="/api/v1", tags=["workflows"])

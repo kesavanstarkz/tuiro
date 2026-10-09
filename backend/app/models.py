@@ -41,6 +41,8 @@ class Organization(Base):
     timezone: Mapped[str] = mapped_column(String(80), default="Asia/Kolkata")
     locale: Mapped[str] = mapped_column(String(20), default="en")
     settings: Mapped[str] = mapped_column(Text, default="{}")
+    org_type: Mapped[str] = mapped_column(String(50), default="EDUCATION")
+    enabled_modules: Mapped[str] = mapped_column(Text, default='["home", "people", "groups", "attendance", "requests", "work", "communication", "calendar", "files", "finance", "reports", "settings"]')
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     @property
@@ -439,9 +441,15 @@ class Notification(Base):
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     organization_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
     recipient: Mapped[str] = mapped_column(String(320))
+    recipient_user_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+    title: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     channel: Mapped[str] = mapped_column(String(30))
     message: Mapped[str] = mapped_column(Text)
     notification_type: Mapped[str] = mapped_column(String(40))
+    deep_link: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    is_read: Mapped[bool] = mapped_column(Boolean, default=False)
+    read_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    idempotency_key: Mapped[Optional[str]] = mapped_column(String(120), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(20), default="PENDING")
     failure_reason: Mapped[Optional[str]] = mapped_column(Text)
     sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
@@ -492,4 +500,39 @@ class PasswordResetToken(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class OrganizationTerminology(Base):
+    __tablename__ = "organization_terminologies"
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    organization_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), unique=True, index=True)
+    template: Mapped[str] = mapped_column(String(50), default="EDUCATION")
+    terms: Mapped[str] = mapped_column(Text, default="{}")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class OrganizationRole(Base):
+    __tablename__ = "organization_roles"
+    __table_args__ = (UniqueConstraint("organization_id", "name", name="uq_org_role_name"),)
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    organization_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(50))
+    display_name: Mapped[str] = mapped_column(String(100))
+    description: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    is_system: Mapped[bool] = mapped_column(Boolean, default=True)
+    permissions: Mapped[str] = mapped_column(Text, default="[]")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class NotificationPreference(Base):
+    __tablename__ = "notification_preferences"
+    __table_args__ = (UniqueConstraint("organization_id", "user_id", name="uq_org_user_notification_pref"),)
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    organization_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    in_app_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    email_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    sms_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    whatsapp_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+
 

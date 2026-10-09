@@ -28,6 +28,13 @@ PERMISSION_MATRIX: dict[Tuple[str, str], Set[str]] = {
     ("POST", "/api/v1/auth/logout"): EVERYONE_AUTHENTICATED,
     ("POST", "/api/v1/auth/switch-organization"): EVERYONE_AUTHENTICATED,
 
+    # Roles & Permissions
+    ("GET", "/api/v1/roles/permissions"): EVERYONE_AUTHENTICATED,
+    ("GET", "/api/v1/roles"): EVERYONE_AUTHENTICATED,
+    ("POST", "/api/v1/roles"): OWNER_ADMIN,
+    ("PUT", "/api/v1/roles/{role_name}"): OWNER_ADMIN,
+    ("DELETE", "/api/v1/roles/{role_name}"): OWNER_ADMIN,
+
     # Students (Teacher gets read-only student roster; Owner/Admin manage)
     ("GET", "/api/v1/students"): STAFF,
     ("POST", "/api/v1/students"): OWNER_ADMIN,
@@ -269,4 +276,144 @@ def get_student_self_id(db: Session, principal: Principal) -> UUID | None:
         )
         return student.id if student else None
     return None
+
+
+# ---------------------------------------------------------------------------
+# P1-01: Permission Catalog & Configurable Roles
+# ---------------------------------------------------------------------------
+
+class PermissionCode:
+    # Organization & Administration
+    ORG_READ = "org:read"
+    ORG_UPDATE = "org:update"
+    ORG_MODULES_MANAGE = "org:modules:manage"
+    ROLES_MANAGE = "roles:manage"
+    MEMBERS_MANAGE = "members:manage"
+
+    # People (Employees, Students, Teachers, Parents)
+    PEOPLE_READ = "people:read"
+    PEOPLE_WRITE = "people:write"
+
+    # Groups (Teams, Classes, Batches, Departments)
+    GROUPS_READ = "groups:read"
+    GROUPS_WRITE = "groups:write"
+
+    # Attendance & Time
+    ATTENDANCE_READ = "attendance:read"
+    ATTENDANCE_WRITE = "attendance:write"
+
+    # Requests & Leaves
+    REQUESTS_READ = "requests:read"
+    REQUESTS_CREATE = "requests:create"
+    REQUESTS_APPROVE = "requests:approve"
+
+    # Tasks & Work
+    TASKS_READ = "tasks:read"
+    TASKS_WRITE = "tasks:write"
+
+    # Collaboration
+    COMMUNICATION_ACCESS = "communication:access"
+    CALENDAR_ACCESS = "calendar:access"
+
+    # Files
+    FILES_READ = "files:read"
+    FILES_WRITE = "files:write"
+
+    # Finance
+    FINANCE_READ = "finance:read"
+    FINANCE_WRITE = "finance:write"
+
+    # Reports & Audit
+    REPORTS_READ = "reports:read"
+    AUDIT_LOG_READ = "audit_log:read"
+
+
+PERMISSION_CATALOG: list[dict] = [
+    {"code": PermissionCode.ORG_READ, "name": "View Organization Details", "category": "Administration", "description": "View organization profile, settings, and enabled modules."},
+    {"code": PermissionCode.ORG_UPDATE, "name": "Update Organization Details", "category": "Administration", "description": "Update organization profile, timezone, currency, and settings."},
+    {"code": PermissionCode.ORG_MODULES_MANAGE, "name": "Manage Modules", "category": "Administration", "description": "Enable or disable platform modules for the organization."},
+    {"code": PermissionCode.ROLES_MANAGE, "name": "Manage Roles & Permissions", "category": "Administration", "description": "Create, modify, and assign custom roles and permission sets."},
+    {"code": PermissionCode.MEMBERS_MANAGE, "name": "Manage Members & Invites", "category": "Administration", "description": "Invite, manage, and remove organization members."},
+    {"code": PermissionCode.PEOPLE_READ, "name": "View People Directory", "category": "People", "description": "View employee or student directories and profiles."},
+    {"code": PermissionCode.PEOPLE_WRITE, "name": "Manage People Directory", "category": "People", "description": "Create, edit, archive, and link people records."},
+    {"code": PermissionCode.GROUPS_READ, "name": "View Groups", "category": "Groups", "description": "View teams, classes, batches, and group rosters."},
+    {"code": PermissionCode.GROUPS_WRITE, "name": "Manage Groups", "category": "Groups", "description": "Create, edit, and manage group rosters and memberships."},
+    {"code": PermissionCode.ATTENDANCE_READ, "name": "View Attendance Records", "category": "Attendance", "description": "View attendance registers, summaries, and reports."},
+    {"code": PermissionCode.ATTENDANCE_WRITE, "name": "Record Attendance", "category": "Attendance", "description": "Record check-ins, check-outs, and mark session registers."},
+    {"code": PermissionCode.REQUESTS_READ, "name": "View Requests", "category": "Requests", "description": "View leave, attendance correction, or permission requests."},
+    {"code": PermissionCode.REQUESTS_CREATE, "name": "Submit Requests", "category": "Requests", "description": "Submit leave or permission requests."},
+    {"code": PermissionCode.REQUESTS_APPROVE, "name": "Approve Requests", "category": "Requests", "description": "Approve or reject requests in approval chains."},
+    {"code": PermissionCode.TASKS_READ, "name": "View Tasks & Work", "category": "Work", "description": "View personal, team, or class tasks and assignments."},
+    {"code": PermissionCode.TASKS_WRITE, "name": "Manage Tasks & Work", "category": "Work", "description": "Create, assign, edit, and grade tasks and work items."},
+    {"code": PermissionCode.COMMUNICATION_ACCESS, "name": "Communication & Collaboration", "category": "Communication", "description": "Participate in group chats, direct messages, and view announcements."},
+    {"code": PermissionCode.CALENDAR_ACCESS, "name": "View Calendar & Schedule", "category": "Calendar", "description": "Access organization, team, or class calendar and timetables."},
+    {"code": PermissionCode.FILES_READ, "name": "View Files", "category": "Files", "description": "View and download shared organization and group files."},
+    {"code": PermissionCode.FILES_WRITE, "name": "Manage Files", "category": "Files", "description": "Upload, categorize, and delete files."},
+    {"code": PermissionCode.FINANCE_READ, "name": "View Finances", "category": "Finance", "description": "View fee invoices, payments, receipts, or payroll records."},
+    {"code": PermissionCode.FINANCE_WRITE, "name": "Manage Finances", "category": "Finance", "description": "Issue fees, process payments, generate receipts, and record payroll."},
+    {"code": PermissionCode.REPORTS_READ, "name": "View Analytics & Reports", "category": "Reports", "description": "Access dashboard metrics, attendance reports, and financial summaries."},
+    {"code": PermissionCode.AUDIT_LOG_READ, "name": "View Audit Logs", "category": "Security", "description": "Inspect security, authentication, and financial audit trails."},
+]
+
+ALL_PERMISSION_CODES: set[str] = {p["code"] for p in PERMISSION_CATALOG}
+
+DEFAULT_ROLE_PERMISSIONS: dict[str, set[str]] = {
+    "SUPER_ADMIN": ALL_PERMISSION_CODES,
+    "OWNER": ALL_PERMISSION_CODES,
+    "ADMIN": {
+        PermissionCode.ORG_READ,
+        PermissionCode.ORG_UPDATE,
+        PermissionCode.ORG_MODULES_MANAGE,
+        PermissionCode.ROLES_MANAGE,
+        PermissionCode.MEMBERS_MANAGE,
+        PermissionCode.PEOPLE_READ,
+        PermissionCode.PEOPLE_WRITE,
+        PermissionCode.GROUPS_READ,
+        PermissionCode.GROUPS_WRITE,
+        PermissionCode.ATTENDANCE_READ,
+        PermissionCode.ATTENDANCE_WRITE,
+        PermissionCode.REQUESTS_READ,
+        PermissionCode.REQUESTS_CREATE,
+        PermissionCode.REQUESTS_APPROVE,
+        PermissionCode.TASKS_READ,
+        PermissionCode.TASKS_WRITE,
+        PermissionCode.COMMUNICATION_ACCESS,
+        PermissionCode.CALENDAR_ACCESS,
+        PermissionCode.FILES_READ,
+        PermissionCode.FILES_WRITE,
+        PermissionCode.FINANCE_READ,
+        PermissionCode.FINANCE_WRITE,
+        PermissionCode.REPORTS_READ,
+        PermissionCode.AUDIT_LOG_READ,
+    },
+    "TEACHER": {
+        PermissionCode.PEOPLE_READ,
+        PermissionCode.GROUPS_READ,
+        PermissionCode.ATTENDANCE_READ,
+        PermissionCode.ATTENDANCE_WRITE,
+        PermissionCode.REQUESTS_CREATE,
+        PermissionCode.REQUESTS_READ,
+        PermissionCode.TASKS_READ,
+        PermissionCode.TASKS_WRITE,
+        PermissionCode.COMMUNICATION_ACCESS,
+        PermissionCode.CALENDAR_ACCESS,
+        PermissionCode.FILES_READ,
+    },
+    "PARENT": {
+        PermissionCode.PEOPLE_READ,
+        PermissionCode.ATTENDANCE_READ,
+        PermissionCode.TASKS_READ,
+        PermissionCode.FINANCE_READ,
+        PermissionCode.CALENDAR_ACCESS,
+        PermissionCode.COMMUNICATION_ACCESS,
+    },
+    "STUDENT": {
+        PermissionCode.PEOPLE_READ,
+        PermissionCode.ATTENDANCE_READ,
+        PermissionCode.TASKS_READ,
+        PermissionCode.CALENDAR_ACCESS,
+        PermissionCode.COMMUNICATION_ACCESS,
+    },
+}
+
 
