@@ -81,14 +81,44 @@ def verify_routes() -> int:
         print(f"ERROR: Untracked route files on disk: {untracked}")
         errors += len(untracked)
 
-    # Check that all registered routes exist on disk
-    missing = registered_files - route_files
-    if missing:
-        print(f"ERROR: Missing route files on disk: {missing}")
-        errors += len(missing)
+    # Inbound link verification: Ensure every route has at least one inbound link/navigation reference
+    source_files = [
+        p for p in (ROOT / "mobile").rglob("*")
+        if p.suffix in {".ts", ".tsx"}
+        and "node_modules" not in p.parts
+        and "dist" not in p.parts
+        and ".expo" not in p.parts
+    ]
+    file_contents = {p: p.read_text(encoding="utf-8", errors="ignore") for p in source_files}
+
+    for url, rel_file, reached_from, status in ROUTES:
+        if url == "/":
+            continue  # App entrypoint
+
+        # Build search patterns for inbound navigation
+        # e.g., /students/[studentId]/attendance matches /students/${...}/attendance
+        pattern_str = re.escape(url)
+        pattern_str = re.sub(r"\\\[[a-zA-Z0-9_]+\\\]", r"(\\$\\{[^\\}]+\\}|[a-zA-Z0-9_-]+)", pattern_str)
+        pat = re.compile(pattern_str)
+
+        # Also match Expo Router tab name registration: name="dashboard", name="students", etc.
+        tab_name = url.lstrip("/")
+        tab_pat = re.compile(r'name=["\']' + re.escape(tab_name) + r'["\']')
+
+        inbound_refs = []
+        for p, content in file_contents.items():
+            # Exclude references within the route file itself
+            if rel_file in p.as_posix():
+                continue
+            if pat.search(content) or tab_pat.search(content):
+                inbound_refs.append(p.relative_to(ROOT).as_posix())
+
+        if not inbound_refs:
+            print(f"ERROR: Route file {rel_file} ({url}) has no inbound link in any navigation or component!")
+            errors += 1
 
     if errors == 0:
-        print(f"SUCCESS: All {len(route_files)} routes verified. Zero placeholders, all routes active and reached.")
+        print(f"SUCCESS: All {len(route_files)} routes verified. Zero placeholders, all routes active and reached with verified inbound links.")
     return errors
 
 

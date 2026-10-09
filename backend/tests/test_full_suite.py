@@ -274,10 +274,11 @@ class TestAcademicAndFinancialWorkflows:
         assert sched_res.status_code == 201
 
         # 9. Generate Monthly Fee
+        future_due = "2028-09-30"
         fee_gen_res = client.post(
             "/api/v1/fees/generate",
             headers=headers,
-            json={"billing_period": "2026-09", "amount": "2500", "due_date": "2026-09-30"},
+            json={"billing_period": "2026-09", "amount": "2500", "due_date": future_due},
         )
         assert fee_gen_res.status_code == 200
         assert fee_gen_res.json()["created"] >= 1
@@ -286,7 +287,7 @@ class TestAcademicAndFinancialWorkflows:
         fee_gen_again = client.post(
             "/api/v1/fees/generate",
             headers=headers,
-            json={"billing_period": "2026-09", "amount": "2500", "due_date": "2026-09-30"},
+            json={"billing_period": "2026-09", "amount": "2500", "due_date": future_due},
         )
         assert fee_gen_again.status_code == 200
         assert fee_gen_again.json()["created"] == 0

@@ -1,90 +1,110 @@
-# Tuiro Architecture
+# Tuiro Platform Architecture
 
-## Product boundary
+## 1. Overview & System Context
 
-Tuiro is a global, multi-tenant SaaS product for small education businesses. The organization is the tenant boundary. Country, currency, timezone, locale, terminology, tax rules, and enabled payment/communication providers are organization configuration, never application constants.
-
-## System architecture
+Tuiro is transitioning from a multi-tenant tuition-centre SaaS into a unified, modular organization-management and collaboration platform (serving SMBs, corporate teams, educational institutions, training centres, and tuition academies) inspired by the breadth of platforms like Zoho People and Microsoft Teams.
 
 ```text
-Expo React Native app
-  -> HTTPS REST /api/v1
-FastAPI API layer
-  -> authentication, authorization, request/response schemas
-Service layer
-  -> fee, payment, receipt, attendance, subscription rules
-Repository layer
-  -> tenant-scoped SQLAlchemy queries
-PostgreSQL (Neon in production)
++-----------------------------------------------------------------------------------+
+|                                  CLIENT LAYER                                     |
+|  +-------------------------------------+   +------------------------------------+  |
+|  | Web Application (Target / Phase 1+) |   | Mobile Application (Current MVP)   |  |
+|  | Next.js App Router, TypeScript,     |   | Expo 57, React Native 0.86,        |  |
+|  | Tailwind CSS, shadcn/ui, TanStack   |   | TanStack Query, Zustand,           |  |
+|  | Query, Zod form validation          |   | Expo Router, SecureStore           |  |
+|  +-------------------------------------+   +------------------------------------+  |
++-----------------------------------------+-----------------------------------------+
+                                          | HTTPS / WebSockets
+                                          v
++-----------------------------------------------------------------------------------+
+|                                FASTAPI BACKEND                                    |
+|  +-----------------------------------------------------------------------------+  |
+|  | API Routing Layer (/api/v1, versioned endpoints, OpenAPI docs)              |  |
+|  +-----------------------------------------------------------------------------+  |
+|  | Authentication & Tenancy Scoping (JWT Bearer, Argon2id, Principal Context)  |  |
+|  +-----------------------------------------------------------------------------+  |
+|  | Configurable Terminology Engine (Canonical terms -> Org-specific labels)    |  |
+|  +-----------------------------------------------------------------------------+  |
+|  | RBAC Authorization Matrix (SUPER_ADMIN, OWNER, ADMIN, TEACHER, PARENT, STU)|  |
+|  +-----------------------------------------------------------------------------+  |
+|  | Core Workflows & Services (People, Groups, Attendance, Requests, Finance)  |  |
+|  +-----------------------------------------------------------------------------+  |
+|  | Provider Abstractions (Payments: Razorpay, Storage: Local/S3, Email/Notify) |  |
+|  +-----------------------------------------------------------------------------+  |
+|  | Async Jobs & Scheduled Commands (Fee reminders, receipts, notifications)     |  |
+|  +-----------------------------------------------------------------------------+  |
++-----------------------------------------+-----------------------------------------+
+                                          | SQLAlchemy 2.0 (ORM)
+                                          v
++-----------------------------------------------------------------------------------+
+|                                PERSISTENCE LAYER                                  |
+|  - PostgreSQL (Primary production, e.g. Neon)                                     |
+|  - SQLite (Local development and fast in-memory regression tests)                 |
+|  - Alembic Schema Migrations (Strictly additive, verified zero drift)             |
++-----------------------------------------------------------------------------------+
 ```
 
-The mobile app stores access and refresh tokens in Expo SecureStore and never connects to PostgreSQL. TanStack Query owns server state; Zustand owns session and UI state. Axios is configured once with access-token injection and refresh handling.
+---
 
-## Backend boundaries
+## 2. Multi-Tenancy Architecture
 
-- `api/`: versioned routers and dependency injection
-- `schemas/`: Pydantic request and response contracts
-- `services/`: business workflows and transaction boundaries
-- `repositories/`: SQLAlchemy persistence, always requiring organization context
-- `models/`: database mappings
-- `core/`: settings, security, database session, permissions
-- `integrations/`: payment, communication, storage, and PDF provider adapters
-- `jobs/`: deferred fee generation, reminders, PDF, and exports
+- **Tenant Isolation**: The `organization_id` is embedded inside the cryptographically signed JWT access token.
+- **Scoping Rule**: Every tenant-owned database table includes an `organization_id` foreign key. All queries are strictly scoped by `organization_id == principal.organization_id`.
+- **Cross-Tenant Security**: Queries or mutations attempting to access resources belonging to a different tenant immediately return `HTTP 404 Not Found` (never `403` or revealing existence of cross-tenant entities).
+- **Multi-Organization Membership**: A single user email can belong to multiple organizations. The `/api/v1/auth/switch-organization` endpoint allows switching context by issuing a new JWT scoped to the chosen organization.
 
-Repositories must not accept an unscoped query from an API handler. A service receives an authenticated principal and organization context, verifies access, then calls a repository with `organization_id` explicitly. Database constraints are the second line of defense.
+---
 
-## Identity and authorization
+## 3. Authentication & Authorization
 
-Roles are `SUPER_ADMIN`, `OWNER`, `ADMIN`, `TEACHER`, `PARENT`, and `STUDENT`. Organization roles are separate from the platform super-admin role. Permission checks are centralized and combine role, organization membership, resource ownership, and feature entitlements.
+### 3.1 Token Lifecycle
+- **Access Tokens**: Short-lived (15 minutes) HS256 JWT tokens containing `sub` (user_id), `org` (organization_id), and `role`.
+- **Refresh Tokens**: Opaque random UUID tokens, stored cryptographically hashed (SHA-256) in the database with 30-day expiration. Rotated on every use; old token is immediately invalidated.
+- **Password Security**: Argon2id password hashing via `pwdlib`.
+- **Password Reset**: Single-use expiring token; timing-safe response (returns 204 regardless of whether the email exists); revokes all active refresh sessions upon completion.
 
-- Super admins access platform administration only.
-- Owners/admins manage organization operations according to configured permissions.
-- Teachers see assigned classes/students and academic workflows, not finances by default.
-- Parents see only their linked students.
-- Students see only their own permitted records.
+### 3.2 Role-Based Access Control (RBAC)
+- Supported canonical roles: `SUPER_ADMIN`, `OWNER`, `ADMIN`, `TEACHER`, `PARENT`, `STUDENT`.
+- Fine-grained permission matrix enforced at route dependencies:
+  - `OWNER` / `ADMIN`: Organization administration, finances, rosters, configuration.
+  - `TEACHER`: Scoped to assigned classes and students; academic workflows; no financial modification.
+  - `PARENT`: Scoped to linked children; attendance, fees, report cards.
+  - `STUDENT`: Scoped strictly to own student records and assignments.
 
-Access tokens are short-lived JWTs. Refresh tokens are rotated, stored hashed in the database, revocable, and bound to a user/session. Passwords use Argon2id or bcrypt through a maintained password-hashing library. No secrets are placed in `EXPO_PUBLIC_*` variables.
+---
 
-## Critical transactional workflows
+## 4. Current Domain Models & The Parallel Architecture Defect
 
-### Fee generation
+In the early tuition-specific codebase, two parallel structures developed:
+1. **Class Model**:
+   - `classes`, `class_students`, `class_teachers`
+   - `attendance_sessions`, `attendance_records`
+   - `student_fees`, `payments`, `receipts`, `organization_receipt_counters`
+   - `academic_tests`, `test_marks`, `homework`, `schedule_entries`
+2. **Group Model**:
+   - `groups`, `group_members` (supports soft removal with `removed_at`)
+   - `group_attendance_sessions`, `group_attendance_records`
+   - `fees`, `fee_payments`
+   - `assignments`, `group_schedules`, `chat_channels`, `chat_messages`
 
-`FeeGenerationService` selects active students and creates one monthly fee per `(organization_id, student_id, billing_period)`. That compound key is unique, so retries are idempotent.
+In Phase 0, data synchronization bridges (such as `ClassGroup` id synchronization, merged attendance reporting, and unified payments) ensure these models co-exist without breaking current users. In Phase 2, these models are consolidated into a single unified `Group` subsystem.
 
-### Payment
+---
 
-Within one database transaction: lock the fee, validate the payment amount against the outstanding balance, insert an immutable payment, recalculate fee status, create an optional receipt, write an audit event, and commit. A duplicate provider transaction reference is rejected by a tenant-scoped unique constraint.
+## 5. Mobile Client Architecture
 
-### Notifications
+- **Stack**: React Native 0.86, Expo 57, Expo Router (file-based navigation).
+- **State Management**:
+  - TanStack Query (v5) for server cache, pagination, and invalidation.
+  - Zustand for user session, active organization, and local UI preferences.
+- **Routing**: 37 verified production routes across Tabs, Auth, Directory, Academics, Finance, and Settings. Zero placeholder screens.
+- **Design Tokens**: Standardized palette (`ink`, `sand`, `coral`, `coralSoft`, `surface`), typography, spacing, and responsive layout primitives (`Screen`, `PageHeader`, `Card`, `Button`, `TuiroInput`).
 
-Domain events such as `PaymentRecorded` and `AttendanceMarkedAbsent` are created after the domain transaction succeeds. Delivery is delegated to `CommunicationProvider` implementations and logged with provider status. Personal WhatsApp automation is not assumed; MVP uses share/deep-link flows where appropriate.
+---
 
-## API conventions
+## 6. Target Web Client Architecture
 
-- Prefix: `/api/v1`
-- JSON request and response schemas only; never expose ORM objects directly.
-- Paginated collections use `{items, next_cursor}`.
-- Errors use `{success: false, error: {code, message, details?}}`.
-- `401` means missing/invalid authentication; `403` means authenticated but forbidden; `404` does not reveal cross-tenant resource existence.
-- Dates are ISO 8601; money is decimal in the API and PostgreSQL `numeric(12,2)` in storage; locale formatting happens at the client edge.
-
-## Mobile navigation
-
-Primary tabs: Dashboard, Students, Attendance, Fees, More.
-
-More routes: Teachers, Parents, Classes, Homework, Tests, Schedule, Receipts, Reports, Notifications, Settings, Subscription.
-
-Each feature screen has loading, error/retry, empty, and success states. The first vertical slice is `Students -> Fees -> Payments -> Receipts -> Reminder`; this is the product's highest-value workflow.
-
-## Delivery milestones
-
-1. Foundation: repository structure, settings, health endpoint, API error envelope, database session, CI checks.
-2. Identity: organizations, users, memberships, registration, login, refresh rotation, logout, RBAC and tenant tests.
-3. Core directory: students, parents, teachers, classes, relationship tables, pagination and search.
-4. Attendance: sessions, records, bulk marking, history, role checks.
-5. Fees and payments: monthly generation, pending views, partial payments, transaction safety, idempotency.
-6. Receipts and reminders: receipt numbering/PDF adapter, share flows, notification log.
-7. Dashboard: organization-configured KPIs, pending fees, today's classes, quick actions.
-8. Hardening: audit log, indexes from query plans, rate limits, security tests, deployment and observability.
-
-Homework, tests, schedules, subscriptions, offline sync, and multilingual UI follow after the core workflow is validated with 5-10 real organizations.
+- **Stack**: Next.js 14+ (App Router), React, TypeScript.
+- **Styling & Components**: Tailwind CSS, shadcn/ui (Radix UI accessible primitives), Lucide React icons.
+- **Forms**: React Hook Form + Zod schema validation.
+- **Shell**: Modular sidebar responding to enabled organization modules and permissions; top bar with organization switcher, global search, and notifications.
