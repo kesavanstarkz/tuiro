@@ -68,6 +68,9 @@ This document lists every active route in the Tuiro mobile application (`mobile/
 | `/requests` | `mobile/app/(app)/requests/index.tsx` | More menu, Desktop Sidebar | Active |
 | `/requests/create` | `mobile/app/(app)/requests/create.tsx` | Requests screen "+ New request", EmptyState action | Active |
 | `/requests/[requestId]` | `mobile/app/(app)/requests/[requestId]/index.tsx` | Requests list rows, Create redirect | Active |
+| `/tasks` | `mobile/app/(app)/tasks/index.tsx` | More menu, Desktop Sidebar | Active |
+| `/tasks/create` | `mobile/app/(app)/tasks/create.tsx` | Tasks screen "+ New task", EmptyState action | Active |
+| `/tasks/[taskId]` | `mobile/app/(app)/tasks/[taskId]/index.tsx` | Tasks list rows, Create redirect | Active |
 
 ---
 

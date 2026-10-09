@@ -65,6 +65,9 @@ ROUTES = [
     ("/requests", "(app)/requests/index.tsx", "More menu, Desktop Sidebar", "Active"),
     ("/requests/create", "(app)/requests/create.tsx", "Requests screen '+ New request', EmptyState action", "Active"),
     ("/requests/[requestId]", "(app)/requests/[requestId]/index.tsx", "Requests list rows, Create redirect", "Active"),
+    ("/tasks", "(app)/tasks/index.tsx", "More menu, Desktop Sidebar", "Active"),
+    ("/tasks/create", "(app)/tasks/create.tsx", "Tasks screen '+ New task', EmptyState action", "Active"),
+    ("/tasks/[taskId]", "(app)/tasks/[taskId]/index.tsx", "Tasks list rows, Create redirect", "Active"),
 ]
 
 

@@ -34,6 +34,7 @@ const GROUPS: Array<{ title: string; items: MenuItem[] }> = [
     {
         title: "WORKFLOWS & BUSINESS",
         items: [
+            { title: "Tasks", route: "/tasks", icon: "checkbox-marked-circle-outline" },
             { title: "Requests", route: "/requests", icon: "file-document-edit-outline" },
             { title: "Receipts", route: "/receipts", icon: "receipt-text-outline" },
             { title: "Reports", route: "/reports", icon: "chart-line" },

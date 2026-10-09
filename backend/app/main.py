@@ -14,6 +14,7 @@ from app.api.workflows import router as workflows_router
 from app.api.unified_groups import router as unified_groups_router
 from app.api.platform_people import router as platform_people_router
 from app.api.requests import router as requests_router
+from app.api.tasks import router as tasks_router
 from app.core.config import settings
 from app.core.errors import register_error_handlers
 
@@ -33,9 +34,11 @@ app.include_router(notifications_router, prefix="/api/v1", tags=["notifications"
 app.include_router(people_router, prefix="/api/v1", tags=["people"])
 app.include_router(groups_router, prefix="/api/v1")
 app.include_router(requests_router, prefix="/api/v1")
+app.include_router(tasks_router, prefix="/api/v1")
 app.include_router(unified_groups_router, prefix="/api/v2")
 app.include_router(platform_people_router, prefix="/api/v2")
 app.include_router(requests_router, prefix="/api/v2")
+app.include_router(tasks_router, prefix="/api/v2")
 app.include_router(workflows_router, prefix="/api/v1", tags=["workflows"])
 app.add_api_route("/api/v1/me", me, methods=["GET"], tags=["auth"])
 
